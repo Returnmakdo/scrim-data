@@ -3,13 +3,19 @@ import { groupBySummonerId } from "../utils/groupBySummonerId";
 import { calculateAverage } from "../utils/calculateAverage";
 import { calculateWinLossAndRateByChampion } from "../utils/calculateWinLossAndRateByChampion";
 
+const allowedIds = ["메이킹서폿", "꼬불이", "이푸카", "막 도", "썬 스토리", "오늘부터착하게살자", "그저 네게 맑아라"];
 
 
 const DataTable = ({ jsonData, version }) => {
-  const groupedData = groupBySummonerId(jsonData);
-  const [selectedRiotId, setSelectedRiotId] = useState(
-    groupedData[0]?.participants[0]?.RIOT_ID_GAME_NAME || groupedData[0]?.participants[0]?.riotIdGameName || ""
-  ); // 기본값 설정
+  const groupedData = groupBySummonerId(jsonData).filter((data) => {
+    const riotId = data.participants[0]?.RIOT_ID_GAME_NAME || data.participants[0]?.riotIdGameName;
+    return allowedIds.includes(riotId);
+  });
+  const [selectedRiotId, setSelectedRiotId] = useState(() => {
+    const firstValid = groupedData[0]?.participants[0];
+    return firstValid?.RIOT_ID_GAME_NAME || firstValid?.riotIdGameName || "";
+  });
+
 
 
   const handleSelectChange = (e) => {
