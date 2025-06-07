@@ -2,25 +2,26 @@ import React from "react";
 import { calculateTeamStats } from "../utils/calculateTeamStats";
 
 const TeamStatsTable = ({ jsonData, version }) => {
-  const teamStats = calculateTeamStats(jsonData);
-  console.log(teamStats);
+  const versionedStats = calculateTeamStats(jsonData);
+  const teamStats = versionedStats[version];
+
   return (
     <div className="mt-5">
       <h5>팀 지표</h5>
-      {teamStats.version === version ? (
+      {teamStats ? (
         <table className="table">
           <thead>
             <tr>
-              <th scope="col">팀</th>
-              <th scope="col">바론 킬</th>
-              <th scope="col">드래곤 킬</th>
-              <th scope="col">전령 킬</th>
-              <th scope="col">유충 소환</th>
-              <th scope="col">아군 타워 파괴</th>
-              <th scope="col">상대 타워 파괴</th>
-              <th scope="col">승리</th>
-              <th scope="col">총 경기 수</th>
-              <th scope="col">승률 (%)</th>
+              <th>팀</th>
+              <th>바론 킬</th>
+              <th>드래곤 킬</th>
+              <th>전령 킬</th>
+              <th>유충 소환</th>
+              <th>아군 타워 파괴</th>
+              <th>상대 타워 파괴</th>
+              <th>승리</th>
+              <th>총 경기 수</th>
+              <th>승률</th>
             </tr>
           </thead>
           <tbody>
@@ -41,7 +42,7 @@ const TeamStatsTable = ({ jsonData, version }) => {
           </tbody>
         </table>
       ) : (
-        <div>해당 버전의 기록이 없습니다</div>
+        <div>해당 버전의 팀 기록이 없습니다</div>
       )}
     </div>
   );
