@@ -1,16 +1,25 @@
 export const groupBySummonerId = (jsonData) => {
   const grouped = jsonData.reduce((acc, data) => {
-    const gameVersion = data.gameVersion; // 게임 버전 추가
+    const gameVersion = data.gameVersion;
+
     data.participants.forEach((participant) => {
       const summonerId = participant.summonerId || participant.SUMMONER_ID;
       if (!acc[summonerId]) {
-        acc[summonerId] = { summonerId, gameVersion, participants: [] };
+        acc[summonerId] = {
+          summonerId,
+          participants: [],
+        };
       }
-      acc[summonerId].participants.push(participant);
+
+      // ✅ 🔥 여기에 gameVersion 직접 주입
+      acc[summonerId].participants.push({
+        ...participant,
+        gameVersion, // <-- 요거 추가!
+      });
     });
+
     return acc;
   }, {});
 
-  // 객체를 배열로 변환
   return Object.values(grouped);
 };

@@ -2,29 +2,52 @@ import React, { useState } from "react";
 import { groupBySummonerId } from "../utils/groupBySummonerId";
 import { calculateAverage } from "../utils/calculateAverage";
 import { calculateWinLossAndRateByChampion } from "../utils/calculateWinLossAndRateByChampion";
+import { championNameMap } from "../utils/championNameMap";
 
-const allowedIds = ["메이킹서폿", "꼬불이", "이푸카", "막 도", "썬 스토리", "오늘부터착하게살자", "그저 네게 맑아라"];
 
+const allowedIds = [
+  "메이킹서폿",
+  "꼬불이",
+  "이푸카",
+  "막 도",
+  "썬 스토리",
+  "오늘부터착하게살자",
+  "그저 네게 맑아라",
+];
 
 const DataTable = ({ jsonData, version }) => {
   const groupedData = groupBySummonerId(jsonData).filter((data) => {
-    const riotId = data.participants[0]?.RIOT_ID_GAME_NAME || data.participants[0]?.riotIdGameName;
+    const riotId =
+      data.participants[0]?.RIOT_ID_GAME_NAME ||
+      data.participants[0]?.riotIdGameName;
     return allowedIds.includes(riotId);
   });
+
   const [selectedRiotId, setSelectedRiotId] = useState(() => {
     const firstValid = groupedData[0]?.participants[0];
-    return firstValid?.RIOT_ID_GAME_NAME || firstValid?.riotIdGameName || "";
+    return (
+      firstValid?.RIOT_ID_GAME_NAME || firstValid?.riotIdGameName || ""
+    );
   });
-
-
 
   const handleSelectChange = (e) => {
     setSelectedRiotId(e.target.value);
   };
 
   const selectedData = groupedData.find(
-    (data) => data.participants[0]?.RIOT_ID_GAME_NAME === selectedRiotId || data.participants[0]?.riotIdGameName === selectedRiotId
+    (data) =>
+      data.participants[0]?.RIOT_ID_GAME_NAME === selectedRiotId ||
+      data.participants[0]?.riotIdGameName === selectedRiotId
   );
+
+
+  // 🔥 version 필터 적용된 데이터
+  const versionFilteredParticipants =
+    selectedData?.participants.filter((p) => {
+      const gv = p.gameVersion;
+      return gv?.split(".").slice(0, 2).join(".") === version;
+    }) || [];
+
   return (
     <div>
       {/* Select Box */}
@@ -32,10 +55,22 @@ const DataTable = ({ jsonData, version }) => {
         <label htmlFor="riotIdSelect" className="form-label">
           Riot ID 선택:
         </label>
-        <select id="riotIdSelect" className="form-select" value={selectedRiotId} onChange={handleSelectChange}>
+        <select
+          id="riotIdSelect"
+          className="form-select"
+          value={selectedRiotId}
+          onChange={handleSelectChange}
+        >
           {groupedData.map((data, index) => (
-            <option key={index} value={data.participants[0]?.RIOT_ID_GAME_NAME || data.participants[0]?.riotIdGameName}>
-              {data.participants[0]?.RIOT_ID_GAME_NAME || data.participants[0]?.riotIdGameName}
+            <option
+              key={index}
+              value={
+                data.participants[0]?.RIOT_ID_GAME_NAME ||
+                data.participants[0]?.riotIdGameName
+              }
+            >
+              {data.participants[0]?.RIOT_ID_GAME_NAME ||
+                data.participants[0]?.riotIdGameName}
             </option>
           ))}
         </select>
@@ -47,18 +82,11 @@ const DataTable = ({ jsonData, version }) => {
           <div className="d-flex flex-column justify-content-center align-items-center mb-3">
             <h5>{selectedRiotId}</h5>
             <span className="badge rounded-pill bg-success">
-              게임 횟수:{" "}
-              {
-                selectedData.participants.filter(
-                  (participant) =>
-                    selectedData.gameVersion && // gameVersion이 존재하는지 확인
-                    version === selectedData.gameVersion.split(".").slice(0, 2).join(".") // 버전 비교
-                ).length
-              }
-              회
+              게임 횟수: {versionFilteredParticipants.length}회
             </span>
           </div>
-          {version === selectedData.gameVersion.split(".").slice(0, 2).join(".") ? (
+
+          {versionFilteredParticipants.length > 0 ? (
             <>
               <table className="table">
                 <thead>
@@ -81,18 +109,90 @@ const DataTable = ({ jsonData, version }) => {
                 <tbody>
                   <tr>
                     <th scope="row">평균</th>
-                    <td>{calculateAverage(selectedData.participants, "CHAMPIONS_KILLED", "championsKilled")}</td>
-                    <td>{calculateAverage(selectedData.participants, "NUM_DEATHS", "numDeaths")}</td>
-                    <td>{calculateAverage(selectedData.participants, "ASSISTS", "assists")}</td>
-                    <td>{calculateAverage(selectedData.participants, "Missions_CreepScore", "missionsCreepscore")}</td>
-                    <td>{calculateAverage(selectedData.participants, "GOLD_EARNED", "goldEarned")}</td>
-                    <td>{calculateAverage(selectedData.participants, "TOTAL_DAMAGE_DEALT_TO_CHAMPIONS", "totalDamageDealtToChampions")}</td>
-                    <td>{calculateAverage(selectedData.participants, "TOTAL_DAMAGE_TAKEN", "totalDamageTaken")}</td>
-                    <td>{calculateAverage(selectedData.participants, "VISION_SCORE", "visionScore")}</td>
-                    <td>{calculateAverage(selectedData.participants, "VISION_WARDS_BOUGHT_IN_GAME", "visionWardsBoughtInGame")}</td>
-                    <td>{calculateAverage(selectedData.participants, "WARD_KILLED", "wardKilled")}</td>
-                    <td>{calculateAverage(selectedData.participants, "WARD_PLACED", "wardPlaced")}</td>
-                    <td>{calculateAverage(selectedData.participants, "Missions_TakedownsBefore15Min", "missionsTakedownsbefore15min")}</td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "CHAMPIONS_KILLED",
+                        "championsKilled"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "NUM_DEATHS",
+                        "numDeaths"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "ASSISTS",
+                        "assists"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "Missions_CreepScore",
+                        "missionsCreepscore"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "GOLD_EARNED",
+                        "goldEarned"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "TOTAL_DAMAGE_DEALT_TO_CHAMPIONS",
+                        "totalDamageDealtToChampions"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "TOTAL_DAMAGE_TAKEN",
+                        "totalDamageTaken"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "VISION_SCORE",
+                        "visionScore"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "VISION_WARDS_BOUGHT_IN_GAME",
+                        "visionWardsBoughtInGame"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "WARD_KILLED",
+                        "wardKilled"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "WARD_PLACED",
+                        "wardPlaced"
+                      )}
+                    </td>
+                    <td>
+                      {calculateAverage(
+                        versionFilteredParticipants,
+                        "Missions_TakedownsBefore15Min",
+                        "missionsTakedownsbefore15min"
+                      )}
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -110,9 +210,11 @@ const DataTable = ({ jsonData, version }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {calculateWinLossAndRateByChampion(selectedData.participants).map((championData, index) => (
+                  {calculateWinLossAndRateByChampion(
+                    versionFilteredParticipants
+                  ).map((championData, index) => (
                     <tr key={index}>
-                      <td>{championData.champion}</td>
+                      <td>{championNameMap[championData.champion] || championData.champion}</td>
                       <td>{championData.wins}</td>
                       <td>{championData.losses}</td>
                       <td>{championData.winRate}</td>
