@@ -1,3 +1,6 @@
+import { allowedIds } from "./allowedIds";
+
+
 export const calculateTeamStats = (jsonData) => {
   const teamStats = {
     blue: {

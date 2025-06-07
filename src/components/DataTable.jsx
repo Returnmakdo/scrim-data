@@ -3,17 +3,8 @@ import { groupBySummonerId } from "../utils/groupBySummonerId";
 import { calculateAverage } from "../utils/calculateAverage";
 import { calculateWinLossAndRateByChampion } from "../utils/calculateWinLossAndRateByChampion";
 import { championNameMap } from "../utils/championNameMap";
+import { allowedIds } from "../utils/allowedIds";
 
-
-const allowedIds = [
-  "메이킹서폿",
-  "꼬불이",
-  "이푸카",
-  "막 도",
-  "썬 스토리",
-  "오늘부터착하게살자",
-  "그저 네게 맑아라",
-];
 
 const DataTable = ({ jsonData, version }) => {
   const groupedData = groupBySummonerId(jsonData).filter((data) => {
