@@ -25,7 +25,7 @@
 
 .save-button {
   width: 80px;
-  padding: 6px px; /* 위아래 여백 추가 */
+  padding: 6px; /* 위아래 여백 추가 */
   line-height: 1.2; /* 글자 높이 조정 */
   display: flex; /* Flexbox로 글자 정렬 */
   align-items: center; /* 수직 중앙 정렬 */

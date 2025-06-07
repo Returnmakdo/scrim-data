@@ -1,6 +1,6 @@
 import React from "react";
 
-const Navbar = ({ viewMode, setViewMode, version, setVersion, openModal }) => {
+const Navbar = ({ viewMode, setViewMode, version, setVersion, openModal, versions = [] }) => {
   return (
     <nav className="navbar navbar-expand-lg navbar-light bg-light mb-4">
       <div className="container-fluid">
@@ -10,8 +10,9 @@ const Navbar = ({ viewMode, setViewMode, version, setVersion, openModal }) => {
         </button>
         <div className="ms-auto">
           <select className="form-select" value={version} onChange={(e) => setVersion(e.target.value)}>
-            <option value="15.8">15.8</option>
-            <option value="15.7">15.7</option>
+            {(versions || []).map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
           </select>
         </div>
         <div className="navbar-nav">

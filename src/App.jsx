@@ -91,9 +91,13 @@ function App() {
     }
   };
 
+  const versions = Array.from(
+    new Set((jsonData || []).map((g) => g.gameVersion?.split(".").slice(0, 2).join(".")))
+  ).sort((a, b) => b.localeCompare(a));
+
   return (
     <div className="container mt-5">
-      <Navbar viewMode={viewMode} setViewMode={setViewMode} version={version} setVersion={setVersion} openModal={openModal} />
+      <Navbar viewMode={viewMode} setViewMode={setViewMode} version={version} setVersion={setVersion} openModal={openModal } versions={versions}/>
       <FileModal isOpen={isModalOpen} closeModal={closeModal} onFileChange={handleFileChange} onSave={handleSaveData} />
       <div className="content">
         {isLoading ? (

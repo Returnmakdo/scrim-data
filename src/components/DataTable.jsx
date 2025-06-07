@@ -3,11 +3,14 @@ import { groupBySummonerId } from "../utils/groupBySummonerId";
 import { calculateAverage } from "../utils/calculateAverage";
 import { calculateWinLossAndRateByChampion } from "../utils/calculateWinLossAndRateByChampion";
 
+
+
 const DataTable = ({ jsonData, version }) => {
   const groupedData = groupBySummonerId(jsonData);
   const [selectedRiotId, setSelectedRiotId] = useState(
     groupedData[0]?.participants[0]?.RIOT_ID_GAME_NAME || groupedData[0]?.participants[0]?.riotIdGameName || ""
   ); // 기본값 설정
+
 
   const handleSelectChange = (e) => {
     setSelectedRiotId(e.target.value);
