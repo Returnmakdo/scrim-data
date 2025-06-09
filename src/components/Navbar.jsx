@@ -22,6 +22,9 @@ const Navbar = ({ viewMode, setViewMode, version, setVersion, openModal, version
           <button className={`nav-link btn ${viewMode === "team" ? "active" : ""}`} onClick={() => setViewMode("team")}>
             팀 지표
           </button>
+          <button className={`nav-link btn ${viewMode === "advanced" ? "active" : ""}`} onClick={() => setViewMode("advanced")}>
+            고급 분석
+          </button>
         </div>
       </div>
     </nav>

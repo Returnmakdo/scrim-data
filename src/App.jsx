@@ -7,6 +7,7 @@ import DataTable from "./components/DataTable";
 import Navbar from "./components/Navbar";
 import FileModal from "./components/FileModal";
 import TeamStatsTable from "./components/TeamDataTable";
+import AdvancedAnalytics from "./components/AdvancedAnalytics";
 
 function App() {
   const [jsonData, setJsonData] = useState([]);
@@ -108,6 +109,7 @@ function App() {
           <>
             {viewMode === "individual" && <DataTable jsonData={jsonData} version={version} />}
             {viewMode === "team" && <TeamStatsTable jsonData={jsonData} version={version} />}
+            {viewMode === "advanced" && <AdvancedAnalytics jsonData={jsonData} version={version} />}
           </>
         )}
       </div>
