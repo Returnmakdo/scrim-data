@@ -23,6 +23,7 @@ import {
   analyzeObjectivePriority,
   calculateObjectiveEfficiency
 } from "../utils/objectAnalysis";
+import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from 'recharts';
 
 const AdvancedAnalytics = ({ jsonData, version }) => {
   const groupedData = groupBySummonerId(jsonData).filter((data) => {
@@ -143,8 +144,657 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
   const positionComparison = versionFilteredParticipants.length > 0 ? 
     compareWithSamePosition(versionFilteredParticipants, allVersionFilteredData, avgMetrics, jsonData) : null;
 
-  // 포지션별 그룹화
+  // 직접 포지션별 평균 계산 함수들 먼저 정의
+  function calculateDirectPositionAverages(allData, position, jsonData) {
+    const samePositionPlayers = allData.filter(p => getPlayerPosition(p) === position);
+    
+    if (samePositionPlayers.length === 0) return null;
+    
+    const metrics = samePositionPlayers.map(p => {
+      const playerGame = jsonData.find(game => 
+        game.participants && game.participants.some(participant => 
+          participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+          participant.TEAM === p.TEAM &&
+          participant.TIME_PLAYED === p.TIME_PLAYED
+        )
+      );
+      const gameParticipants = playerGame ? playerGame.participants : null;
+      return calculateAdvancedMetrics(p, null, gameParticipants);
+    });
+    
+    const averages = {
+      kda: (metrics.reduce((sum, m) => sum + parseFloat(m.kda), 0) / metrics.length).toFixed(2),
+      killParticipation: (metrics.reduce((sum, m) => sum + parseFloat(m.killParticipation || 0), 0) / metrics.length).toFixed(1),
+      damageEfficiency: (metrics.reduce((sum, m) => sum + parseFloat(m.damageEfficiency), 0) / metrics.length).toFixed(2),
+      goldEfficiency: (metrics.reduce((sum, m) => sum + parseFloat(m.goldEfficiency), 0) / metrics.length).toFixed(2),
+      csPerMinute: (metrics.reduce((sum, m) => sum + parseFloat(m.csPerMinute), 0) / metrics.length).toFixed(1),
+      visionContribution: (metrics.reduce((sum, m) => sum + parseFloat(m.visionContribution), 0) / metrics.length).toFixed(1)
+    };
+
+    // 15분전 킬관여율 평균 계산
+    const earlyKillParticipationMetrics = samePositionPlayers.map(p => {
+      const playerGame = jsonData.find(game => 
+        game.participants && game.participants.some(participant => 
+          participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+          participant.TEAM === p.TEAM &&
+          participant.TIME_PLAYED === p.TIME_PLAYED
+        )
+      );
+      const gameParticipants = playerGame ? playerGame.participants : null;
+      return calculateEarlyKillParticipation(p, gameParticipants);
+    });
+    
+    averages.earlyKillParticipation = (earlyKillParticipationMetrics.reduce((sum, m) => sum + parseFloat(m || 0), 0) / earlyKillParticipationMetrics.length).toFixed(1);
+
+    // 포지션별 특수 지표 평균 계산
+    if (position === "JUNGLE") {
+      const junglerMetrics = samePositionPlayers.map(p => {
+        const playerGame = jsonData.find(game => 
+          game.participants && game.participants.some(participant => 
+            participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+            participant.TEAM === p.TEAM &&
+            participant.TIME_PLAYED === p.TIME_PLAYED
+          )
+        );
+        const gameParticipants = playerGame ? playerGame.participants : null;
+        return calculateJunglerSpecialMetrics(p, gameParticipants);
+      });
+      
+      averages.jungleCSPerMinute = (junglerMetrics.reduce((sum, m) => sum + parseFloat(m.jungleCSPerMinute), 0) / junglerMetrics.length).toFixed(1);
+      averages.counterJungleRate = (junglerMetrics.reduce((sum, m) => sum + parseFloat(m.counterJungleRate), 0) / junglerMetrics.length).toFixed(1);
+      averages.ownJungleControl = (junglerMetrics.reduce((sum, m) => sum + parseFloat(m.ownJungleControl), 0) / junglerMetrics.length).toFixed(1);
+    } else if (position === "SUPPORT") {
+      const supportMetrics = samePositionPlayers.map(p => {
+        const playerGame = jsonData.find(game => 
+          game.participants && game.participants.some(participant => 
+            participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+            participant.TEAM === p.TEAM &&
+            participant.TIME_PLAYED === p.TIME_PLAYED
+          )
+        );
+        const gameParticipants = playerGame ? playerGame.participants : null;
+        return calculateSupportSpecialMetrics(p, gameParticipants);
+      });
+      
+      averages.wardsPlaced = (supportMetrics.reduce((sum, m) => sum + parseFloat(m.wardsPlaced), 0) / supportMetrics.length).toFixed(1);
+      averages.wardsKilled = (supportMetrics.reduce((sum, m) => sum + parseFloat(m.wardsKilled), 0) / supportMetrics.length).toFixed(1);
+    }
+    
+    return averages;
+  }
+
+  // 플레이어 성능 분석 함수 (개선점 + 강점)
+  function analyzePlayerPerformance(playerMetrics, positionAverages, position) {
+    const improvements = [];
+    const strengths = [];
+    
+    console.log("성능 분석 함수 호출됨");
+    console.log("playerMetrics:", playerMetrics);
+    console.log("positionAverages:", positionAverages);
+    
+    // KDA 분석 - 포지션 평균 대비 상대평가 (통일된 기준: ±10%)
+    const kdaDiff = parseFloat(playerMetrics.kda) - parseFloat(positionAverages.kda);
+    const kdaPercentDiff = (kdaDiff / parseFloat(positionAverages.kda)) * 100;
+    if (kdaPercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+      improvements.push({
+        category: "생존력",
+        metric: `KDA ${playerMetrics.kda} (평균 ${positionAverages.kda})`,
+        suggestion: "데스 줄이기, 안전한 포지셔닝"
+      });
+    } else if (kdaPercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+      strengths.push({
+        category: "생존력",
+        metric: `KDA ${playerMetrics.kda} (평균 ${positionAverages.kda})`,
+        description: "우수한 생존력과 킬 관여"
+      });
+    }
+    
+    // 데미지 효율성 분석 - 포지션 평균 대비 상대평가 (통일된 기준: ±10%)
+    const damageDiff = parseFloat(playerMetrics.damageEfficiency) - parseFloat(positionAverages.damageEfficiency);
+    const damagePercentDiff = (damageDiff / parseFloat(positionAverages.damageEfficiency)) * 100;
+    if (damagePercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+      improvements.push({
+        category: "딜링",
+        metric: `데미지효율 ${playerMetrics.damageEfficiency} (평균 ${positionAverages.damageEfficiency})`,
+        suggestion: "포지셔닝 개선, 스킬 콤보 연습"
+      });
+    } else if (damagePercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+      strengths.push({
+        category: "딜링",
+        metric: `데미지효율 ${playerMetrics.damageEfficiency} (평균 ${positionAverages.damageEfficiency})`,
+        description: "효율적인 딜링 능력"
+      });
+    }
+    
+    // 골드 효율성 분석 - 포지션 평균 대비 상대평가 (통일된 기준: ±10%)
+    const goldDiff = parseFloat(playerMetrics.goldEfficiency) - parseFloat(positionAverages.goldEfficiency);
+    const goldPercentDiff = (goldDiff / parseFloat(positionAverages.goldEfficiency)) * 100;
+    if (goldPercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+      improvements.push({
+        category: "골드활용",
+        metric: `골드효율 ${playerMetrics.goldEfficiency} (평균 ${positionAverages.goldEfficiency})`,
+        suggestion: "아이템 빌드 최적화"
+      });
+    } else if (goldPercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+      strengths.push({
+        category: "골드활용",
+        metric: `골드효율 ${playerMetrics.goldEfficiency} (평균 ${positionAverages.goldEfficiency})`,
+        description: "효율적인 골드 활용"
+      });
+    }
+    
+    // CS/분 분석 - 포지션 평균 대비 상대평가 (통일된 기준: ±10%)
+    const csDiff = parseFloat(playerMetrics.csPerMinute) - parseFloat(positionAverages.csPerMinute);
+    const csPercentDiff = (csDiff / parseFloat(positionAverages.csPerMinute)) * 100;
+    if (csPercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+      improvements.push({
+        category: "파밍",
+        metric: `CS/분 ${playerMetrics.csPerMinute} (평균 ${positionAverages.csPerMinute})`,
+        suggestion: "라인 클리어, 사이드 파밍 늘리기"
+      });
+    } else if (csPercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+      strengths.push({
+        category: "파밍",
+        metric: `CS/분 ${playerMetrics.csPerMinute} (평균 ${positionAverages.csPerMinute})`,
+        description: "우수한 파밍 능력"
+      });
+    }
+
+    // 킬 관여율 분석 - 포지션 평균 대비 상대평가 (통일된 기준: ±10%)
+    const kpDiff = parseFloat(playerMetrics.killParticipation) - parseFloat(positionAverages.killParticipation);
+    const kpPercentDiff = (kpDiff / parseFloat(positionAverages.killParticipation)) * 100;
+    if (kpPercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+      improvements.push({
+        category: "팀파이트",
+        metric: `킬관여 ${playerMetrics.killParticipation}% (평균 ${positionAverages.killParticipation}%)`,
+        suggestion: "팀과 함께 움직이기"
+      });
+    } else if (kpPercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+      strengths.push({
+        category: "팀파이트",
+        metric: `킬관여 ${playerMetrics.killParticipation}% (평균 ${positionAverages.killParticipation}%)`,
+        description: "적극적인 팀파이트 참여"
+      });
+    }
+
+    // 시야 기여도 분석 - 포지션 평균 대비 상대평가 (통일된 기준: ±10%)
+    const visionDiff = parseFloat(playerMetrics.visionContribution) - parseFloat(positionAverages.visionContribution);
+    const visionPercentDiff = (visionDiff / parseFloat(positionAverages.visionContribution)) * 100;
+    if (visionPercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+      improvements.push({
+        category: "시야",
+        metric: `시야기여 ${playerMetrics.visionContribution}% (평균 ${positionAverages.visionContribution}%)`,
+        suggestion: "와드 설치/제거 늘리기"
+      });
+    } else if (visionPercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+      strengths.push({
+        category: "시야",
+        metric: `시야기여 ${playerMetrics.visionContribution}% (평균 ${positionAverages.visionContribution}%)`,
+        description: "우수한 시야 장악력"
+      });
+    }
+    
+    // 포지션별 특수 분석 - 통일된 기준 (±10%)
+    if (position === "JUNGLE") {
+      // 정글 CS/분 상대평가
+      if (playerMetrics.jungleCSPerMinute && positionAverages.jungleCSPerMinute) {
+        const jungleCSPercentDiff = ((parseFloat(playerMetrics.jungleCSPerMinute) - parseFloat(positionAverages.jungleCSPerMinute)) / parseFloat(positionAverages.jungleCSPerMinute)) * 100;
+        if (jungleCSPercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+          improvements.push({
+            category: "정글파밍",
+            metric: `정글CS/분 ${playerMetrics.jungleCSPerMinute} (평균 ${positionAverages.jungleCSPerMinute})`,
+            suggestion: "정글 루트 최적화"
+          });
+        } else if (jungleCSPercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+          strengths.push({
+            category: "정글파밍",
+            metric: `정글CS/분 ${playerMetrics.jungleCSPerMinute} (평균 ${positionAverages.jungleCSPerMinute})`,
+            description: "효율적인 정글 파밍"
+          });
+        }
+      }
+      
+      // 카정 비율 상대평가
+      if (playerMetrics.counterJungleRate && positionAverages.counterJungleRate) {
+        const counterJunglePercentDiff = ((parseFloat(playerMetrics.counterJungleRate) - parseFloat(positionAverages.counterJungleRate)) / parseFloat(positionAverages.counterJungleRate)) * 100;
+        if (counterJunglePercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+          improvements.push({
+            category: "정글침입",
+            metric: `카정비율 ${playerMetrics.counterJungleRate}% (평균 ${positionAverages.counterJungleRate}%)`,
+            suggestion: "안전한 타이밍에 상대 정글 침입"
+          });
+        } else if (counterJunglePercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+          strengths.push({
+            category: "정글침입",
+            metric: `카정비율 ${playerMetrics.counterJungleRate}% (평균 ${positionAverages.counterJungleRate}%)`,
+            description: "적극적인 정글 침입"
+          });
+        }
+      }
+    } else if (position === "SUPPORT") {
+      // 와드 설치 상대평가
+      if (playerMetrics.wardsPlaced && positionAverages.wardsPlaced) {
+        const wardsPlacedPercentDiff = ((parseFloat(playerMetrics.wardsPlaced) - parseFloat(positionAverages.wardsPlaced)) / parseFloat(positionAverages.wardsPlaced)) * 100;
+        if (wardsPlacedPercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+          improvements.push({
+            category: "시야장악",
+            metric: `와드설치 ${playerMetrics.wardsPlaced}개 (평균 ${positionAverages.wardsPlaced}개)`,
+            suggestion: "더 적극적인 와드 설치"
+          });
+        } else if (wardsPlacedPercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+          strengths.push({
+            category: "시야장악",
+            metric: `와드설치 ${playerMetrics.wardsPlaced}개 (평균 ${positionAverages.wardsPlaced}개)`,
+            description: "우수한 시야 제공"
+          });
+        }
+      }
+      
+      // 와드 제거 상대평가
+      if (playerMetrics.wardsKilled && positionAverages.wardsKilled) {
+        const wardsKilledPercentDiff = ((parseFloat(playerMetrics.wardsKilled) - parseFloat(positionAverages.wardsKilled)) / parseFloat(positionAverages.wardsKilled)) * 100;
+        if (wardsKilledPercentDiff < -10) { // 평균보다 10% 이상 낮으면 개선점
+          improvements.push({
+            category: "시야차단",
+            metric: `와드제거 ${playerMetrics.wardsKilled}개 (평균 ${positionAverages.wardsKilled}개)`,
+            suggestion: "더 적극적인 와드 제거"
+          });
+        } else if (wardsKilledPercentDiff > 10) { // 평균보다 10% 이상 높으면 강점
+          strengths.push({
+            category: "시야차단",
+            metric: `와드제거 ${playerMetrics.wardsKilled}개 (평균 ${positionAverages.wardsKilled}개)`,
+            description: "적극적인 시야 차단"
+          });
+        }
+      }
+    }
+    
+    console.log("생성된 improvements:", improvements);
+    console.log("생성된 strengths:", strengths);
+    return { improvements, strengths };
+  }
+
+  // 직접 포지션별 평균 계산
+  const directPosAverages = calculateDirectPositionAverages(allVersionFilteredData, playerPosition, jsonData);
+  console.log("directPositionAverages:", directPosAverages);
+  console.log("avgMetrics:", avgMetrics);
+  
+  const analysisResult = directPosAverages ? 
+    analyzePlayerPerformance(avgMetrics, directPosAverages, playerPosition) : { improvements: [], strengths: [] };
+
+  // 통일된 포지션 평균 사용
+  const unifiedPositionComparison = positionComparison ? {
+    ...positionComparison,
+    positionAverage: directPosAverages // 개선점과 같은 평균 사용
+  } : null;
+
+  // 포지션별 그룹화 (레이더 차트에서 사용하므로 먼저 정의)
   const positionGroups = groupPlayersByPosition(allVersionFilteredData);
+  
+  // 안전성 검사
+  if (!positionGroups[playerPosition]) {
+    console.error("해당 포지션의 데이터가 없습니다:", playerPosition);
+    console.log("사용 가능한 포지션들:", Object.keys(positionGroups));
+  }
+
+  // 백분위를 0-100 스케일로 변환하는 함수 (백분위 기반) - 먼저 정의
+  const getPercentileValue = (value, positionData, metric) => {
+    if (!positionData || positionData.length === 0) return 50;
+    
+    try {
+      const percentileString = calculatePercentile(value, positionData, metric);
+      if (!percentileString || percentileString === "N/A") return 50;
+      
+      const match = percentileString.match(/상위 (\d+)%/);
+      if (match) {
+        const percentile = parseInt(match[1]);
+        return 100 - percentile; // 상위 10% -> 90점, 상위 29% -> 71점
+      }
+      return 50;
+    } catch (error) {
+      console.error("백분위 변환 오류:", error);
+      return 50;
+    }
+  };
+
+  // 백분위 점수를 등급으로 변환하는 함수
+  const getGradeFromPercentile = (percentileScore) => {
+    if (percentileScore >= 95) return { grade: 'S', color: '#e74c3c', bgColor: '#e74c3c' }; // Red
+    if (percentileScore >= 85) return { grade: 'A', color: '#f39c12', bgColor: '#f39c12' }; // Orange
+    if (percentileScore >= 70) return { grade: 'B+', color: '#f1c40f', bgColor: '#f1c40f' }; // Yellow
+    if (percentileScore >= 55) return { grade: 'B', color: '#bdc3c7', bgColor: '#bdc3c7' }; // Light Gray
+    if (percentileScore >= 40) return { grade: 'B-', color: '#95a5a6', bgColor: '#95a5a6' }; // Gray
+    if (percentileScore >= 25) return { grade: 'C', color: '#3498db', bgColor: '#3498db' }; // Blue
+    if (percentileScore >= 10) return { grade: 'D', color: '#2980b9', bgColor: '#2980b9' }; // Darker Blue
+    return { grade: 'F', color: '#1f6392', bgColor: '#1f6392' }; // Deep Blue
+  };
+
+  // 백분위 계산 함수
+  const calculatePercentile = (value, positionData, metric) => {
+    if (!positionData || positionData.length === 0) return "N/A";
+    
+    // 고유한 플레이어별로 평균값 계산
+    const playerAverages = new Map();
+    
+    positionData.forEach(p => {
+      const playerName = p.RIOT_ID_GAME_NAME;
+      
+      // 해당 플레이어가 속한 게임 찾기
+      let gameParticipants = null;
+      const playerGame = jsonData.find(game => 
+        game.participants && game.participants.some(participant => 
+          participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+          participant.TEAM === p.TEAM &&
+          participant.TIME_PLAYED === p.TIME_PLAYED
+        )
+      );
+      gameParticipants = playerGame ? playerGame.participants : null;
+      
+      // 특수 지표들 처리
+      let metricValue;
+      if (metric === 'jungleCSPerMinute' || metric === 'counterJungleRate' || metric === 'ownJungleControl') {
+        const junglerMetrics = calculateJunglerSpecialMetrics(p, gameParticipants);
+        metricValue = parseFloat(junglerMetrics[metric]);
+      } else if (metric === 'wardsPlaced' || metric === 'wardsKilled') {
+        const supportMetrics = calculateSupportSpecialMetrics(p, gameParticipants);
+        metricValue = parseFloat(supportMetrics[metric]);
+      } else if (metric === 'earlyKillParticipation') {
+        metricValue = parseFloat(calculateEarlyKillParticipation(p, gameParticipants));
+      } else {
+        const metrics = calculateAdvancedMetrics(p, null, gameParticipants);
+        metricValue = parseFloat(metrics[metric]);
+      }
+      
+      // 플레이어별 값들을 누적
+      if (!playerAverages.has(playerName)) {
+        playerAverages.set(playerName, []);
+      }
+      playerAverages.get(playerName).push(metricValue);
+    });
+    
+    // 각 플레이어의 평균값 계산
+    const uniquePlayerValues = [];
+    playerAverages.forEach((values, playerName) => {
+      const average = values.reduce((sum, val) => sum + val, 0) / values.length;
+      uniquePlayerValues.push(average);
+    });
+    
+    uniquePlayerValues.sort((a, b) => a - b);
+    const playerValue = parseFloat(value) || 0;
+    
+    let rank = uniquePlayerValues.findIndex(v => v >= playerValue);
+    if (rank === -1) rank = uniquePlayerValues.length;
+    
+    const percentile = Math.round((rank / uniquePlayerValues.length) * 100);
+    return `상위 ${100 - percentile}%`;
+  };
+
+  // 실제 값을 0-100 스케일로 정규화하는 함수
+  const normalizeValue = (value, positionData, metric) => {
+    if (!positionData || positionData.length === 0) return 50;
+    
+    try {
+      // 포지션별 해당 지표의 모든 값들 수집
+      const values = [];
+      positionData.forEach(p => {
+        let metricValue;
+        if (metric === 'jungleCSPerMinute' || metric === 'counterJungleRate' || metric === 'ownJungleControl') {
+          const playerGame = jsonData.find(game => 
+            game.participants && game.participants.some(participant => 
+              participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+              participant.TEAM === p.TEAM &&
+              participant.TIME_PLAYED === p.TIME_PLAYED
+            )
+          );
+          const gameParticipants = playerGame ? playerGame.participants : null;
+          const junglerMetrics = calculateJunglerSpecialMetrics(p, gameParticipants);
+          metricValue = parseFloat(junglerMetrics[metric]);
+        } else if (metric === 'wardsPlaced' || metric === 'wardsKilled') {
+          const playerGame = jsonData.find(game => 
+            game.participants && game.participants.some(participant => 
+              participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+              participant.TEAM === p.TEAM &&
+              participant.TIME_PLAYED === p.TIME_PLAYED
+            )
+          );
+          const gameParticipants = playerGame ? playerGame.participants : null;
+          const supportMetrics = calculateSupportSpecialMetrics(p, gameParticipants);
+          metricValue = parseFloat(supportMetrics[metric]);
+        } else if (metric === 'earlyKillParticipation') {
+          const playerGame = jsonData.find(game => 
+            game.participants && game.participants.some(participant => 
+              participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+              participant.TEAM === p.TEAM &&
+              participant.TIME_PLAYED === p.TIME_PLAYED
+            )
+          );
+          const gameParticipants = playerGame ? playerGame.participants : null;
+          metricValue = parseFloat(calculateEarlyKillParticipation(p, gameParticipants));
+        } else {
+          const playerGame = jsonData.find(game => 
+            game.participants && game.participants.some(participant => 
+              participant.RIOT_ID_GAME_NAME === p.RIOT_ID_GAME_NAME && 
+              participant.TEAM === p.TEAM &&
+              participant.TIME_PLAYED === p.TIME_PLAYED
+            )
+          );
+          const gameParticipants = playerGame ? playerGame.participants : null;
+          const metrics = calculateAdvancedMetrics(p, null, gameParticipants);
+          metricValue = parseFloat(metrics[metric]);
+        }
+        
+        if (!isNaN(metricValue)) {
+          values.push(metricValue);
+        }
+      });
+      
+      if (values.length === 0) return 50;
+      
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const playerValue = parseFloat(value) || 0;
+      
+      // 최소값과 최대값이 같으면 평균값 반환
+      if (max === min) return 50;
+      
+      // 0-100 스케일로 정규화
+      const normalized = ((playerValue - min) / (max - min)) * 100;
+      return Math.max(0, Math.min(100, normalized));
+      
+    } catch (error) {
+      console.error("정규화 오류:", error);
+      return 50;
+    }
+  };
+
+  // 포지션별 특수 지표를 레이더 차트에 추가
+  let radarData = [];
+  
+  if (playerPosition === "JUNGLE") {
+    radarData = [
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.kda, positionGroups[playerPosition], 'kda')).grade}\nKDA`,
+        player: getPercentileValue(avgMetrics.kda, positionGroups[playerPosition], 'kda'),
+        average: 50, // 평균은 항상 50%로 설정
+        fullMark: 100
+      },
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.killParticipation, positionGroups[playerPosition], 'killParticipation')).grade}\n킬 관여율`,
+        player: getPercentileValue(avgMetrics.killParticipation, positionGroups[playerPosition], 'killParticipation'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.jungleCSPerMinute, positionGroups[playerPosition], 'jungleCSPerMinute')).grade}\n정글 CS/분`,
+        player: getPercentileValue(avgMetrics.jungleCSPerMinute, positionGroups[playerPosition], 'jungleCSPerMinute'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.counterJungleRate, positionGroups[playerPosition], 'counterJungleRate')).grade}\n카정 비율`,
+        player: getPercentileValue(avgMetrics.counterJungleRate, positionGroups[playerPosition], 'counterJungleRate'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.damageEfficiency, positionGroups[playerPosition], 'damageEfficiency')).grade}\n데미지 효율`,
+        player: getPercentileValue(avgMetrics.damageEfficiency, positionGroups[playerPosition], 'damageEfficiency'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.visionContribution, positionGroups[playerPosition], 'visionContribution')).grade}\n시야 기여`,
+        player: getPercentileValue(avgMetrics.visionContribution, positionGroups[playerPosition], 'visionContribution'),
+        average: 50,
+        fullMark: 100
+      }
+    ];
+  } else if (playerPosition === "SUPPORT") {
+    radarData = [
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.kda, positionGroups[playerPosition], 'kda')).grade}\nKDA`,
+        player: getPercentileValue(avgMetrics.kda, positionGroups[playerPosition], 'kda'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.killParticipation, positionGroups[playerPosition], 'killParticipation')).grade}\n킬 관여율`,
+        player: getPercentileValue(avgMetrics.killParticipation, positionGroups[playerPosition], 'killParticipation'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: `${getGradeFromPercentile(getPercentileValue(avgMetrics.wardsPlaced, positionGroups[playerPosition], 'wardsPlaced')).grade}\n와드 설치`,
+        player: getPercentileValue(avgMetrics.wardsPlaced, positionGroups[playerPosition], 'wardsPlaced'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: '와드 제거',
+        player: getPercentileValue(avgMetrics.wardsKilled, positionGroups[playerPosition], 'wardsKilled'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: '골드 효율',
+        player: getPercentileValue(avgMetrics.goldEfficiency, positionGroups[playerPosition], 'goldEfficiency'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: '시야 기여',
+        player: getPercentileValue(avgMetrics.visionContribution, positionGroups[playerPosition], 'visionContribution'),
+        average: 50,
+        fullMark: 100
+      }
+    ];
+  } else {
+    // 기타 포지션 (TOP, MIDDLE, BOTTOM)
+    radarData = [
+      {
+        subject: 'KDA',
+        player: getPercentileValue(avgMetrics.kda, positionGroups[playerPosition], 'kda'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: '킬 관여율',
+        player: getPercentileValue(avgMetrics.killParticipation, positionGroups[playerPosition], 'killParticipation'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: '데미지 효율',
+        player: getPercentileValue(avgMetrics.damageEfficiency, positionGroups[playerPosition], 'damageEfficiency'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: '골드 효율',
+        player: getPercentileValue(avgMetrics.goldEfficiency, positionGroups[playerPosition], 'goldEfficiency'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: 'CS/분',
+        player: getPercentileValue(avgMetrics.csPerMinute, positionGroups[playerPosition], 'csPerMinute'),
+        average: 50,
+        fullMark: 100
+      },
+      {
+        subject: '시야 기여',
+        player: getPercentileValue(avgMetrics.visionContribution, positionGroups[playerPosition], 'visionContribution'),
+        average: 50,
+        fullMark: 100
+      }
+    ];
+  }
+
+  const CustomizedAxisTick = ({ x, y, payload, index }) => {
+    const dataPoint = radarData[index];
+    if (!dataPoint) {
+      return (
+        <text x={x} y={y} dy={5} textAnchor="middle" fill="#fff" fontSize={12} fontWeight="bold">
+          {payload.value}
+        </text>
+      );
+    }
+    const gradeInfo = getGradeFromPercentile(dataPoint.player);
+
+    let textAnchor = "middle";
+    let gradeX = 0;
+    let gradeY = -8;
+    let labelX = 0;
+    let labelY = 12;
+
+    switch (index) {
+      case 0: // Top
+        gradeY = -22;
+        labelY = 0;
+        break;
+      case 1: // Top-right
+      case 2: // Bottom-right
+        textAnchor = "start";
+        gradeX = 10;
+        labelX = 10;
+        break;
+      case 3: // Bottom
+        gradeY = 12;
+        labelY = 30;
+        break;
+      case 4: // Bottom-left
+      case 5: // Top-left
+        textAnchor = "end";
+        gradeX = -10;
+        labelX = -10;
+        break;
+      default:
+        break;
+    }
+
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text x={gradeX} y={gradeY} textAnchor={textAnchor} fill={gradeInfo.color} fontSize={16} fontWeight="bold">
+          {gradeInfo.grade}
+        </text>
+        <text x={labelX} y={labelY} textAnchor={textAnchor} fill="#fff" fontSize={12} fontWeight="bold">
+          {payload.value}
+        </text>
+      </g>
+    );
+  };
+
+  // 포지션 평균 대비 퍼센트 계산 함수
+  const calculateComparisonPercentage = (playerValue, positionAverage) => {
+    if (!positionAverage || positionAverage === 0) return "N/A";
+    const player = parseFloat(playerValue) || 0;
+    const average = parseFloat(positionAverage) || 0;
+    const percentage = ((player - average) / average * 100).toFixed(1);
+    return percentage > 0 ? `+${percentage}%` : `${percentage}%`;
+  };
+
+  // 개선점 제안 (포지션별 평균과 비교) - 수정된 로직
+  // positionComparison에 의존하지 않고 직접 계산
 
   // 폼 분석
   const formAnalysis = compareRecentVsOverall(versionFilteredParticipants);
@@ -157,10 +807,6 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
   
   // 사이드 선호도 분석
   const sidePreference = analyzeSidePreference(versionFilteredParticipants);
-
-  // 개선점 제안 (포지션별 평균과 비교)
-  const positionAverages = positionComparison?.positionAverage || avgMetrics;
-  const improvements = suggestImprovements(avgMetrics, positionAverages);
 
   // 오브젝트 분석
   const objectiveStats = calculateObjectiveStats(jsonData, version);
@@ -203,10 +849,10 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
       {/* 플레이어 정보 표시 */}
       {versionFilteredParticipants.length > 0 && (
-        <div className="alert alert-info mb-4">
-          <strong>플레이어:</strong> {selectedRiotId} | 
-          <strong> 주 포지션:</strong> {getPlayerPosition(versionFilteredParticipants[0])} | 
-          <strong> 분석 게임 수:</strong> {versionFilteredParticipants.length}게임
+        <div className="alert mb-4" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333', color: '#fff' }}>
+          <strong className="text-white">플레이어:</strong> {selectedRiotId} | 
+          <strong className="text-white"> 주 포지션:</strong> {getPlayerPosition(versionFilteredParticipants[0])} | 
+          <strong className="text-white"> 분석 게임 수:</strong> {versionFilteredParticipants.length}게임
         </div>
       )}
 
@@ -265,73 +911,497 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
       {/* 고급 지표 탭 */}
       {activeTab === "advanced" && (
         <div>
-          <h5>고급 분석 지표</h5>
+          <h5 className="text-white">고급 분석 지표</h5>
           
-          {/* 주요 지표 카드들 */}
-          <div className="row g-3 mb-4">
-            <div className="col-md-2">
-              <div className="card text-center h-100">
-                <div className="card-body">
-                  <h6 className="card-title text-primary">KDA</h6>
-                  <div className="display-6 fw-bold">{avgMetrics.kda}</div>
+          {/* 레이더 차트와 주요 지표 */}
+          <div className="row mb-4">
+            {/* 레이더 차트 */}
+            <div className="col-lg-8">
+              <div className="card" style={{ backgroundColor: '#1a1a1a', border: 'none' }}>
+                <div className="card-header" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                  <h6 className="mb-0 text-white">
+                    <i className="bi bi-radar me-2"></i>포지션 내 백분위 순위
+                  </h6>
+                  <small className="text-light">회색: 포지션 평균, 주황색: 내 성능 (백분위 기준)</small>
+                </div>
+                <div className="card-body" style={{ height: '400px', position: 'relative' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart data={radarData} outerRadius="75%">
+                      <PolarGrid stroke="#444" />
+                      <PolarAngleAxis dataKey="subject" tick={<CustomizedAxisTick />} />
+                      <PolarRadiusAxis 
+                        angle={90} 
+                        domain={[0, 100]} 
+                        tick={{ fill: '#888', fontSize: 10 }}
+                        tickCount={6}
+                      />
+                      <Radar
+                        name="평균"
+                        dataKey="average"
+                        stroke="#666"
+                        fill="#333"
+                        fillOpacity={0.3}
+                        strokeWidth={2}
+                      />
+                      <Radar
+                        name="개인"
+                        dataKey="player"
+                        stroke="#ff6b35"
+                        fill="#ff6b35"
+                        fillOpacity={0.4}
+                        strokeWidth={3}
+                      />
+                    </RadarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             </div>
-            <div className="col-md-2">
-              <div className="card text-center h-100">
-                <div className="card-body">
-                  <h6 className="card-title text-danger">데미지 효율성</h6>
-                  <div className="display-6 fw-bold">{avgMetrics.damageEfficiency}</div>
+
+            {/* 주요 지표 박스들 */}
+            <div className="col-lg-4">
+              <div className="row g-3">
+                {/* KDA */}
+                <div className="col-12">
+                  <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: '2px solid #ff6b35' }}>
+                    <div className="card-body py-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="card-title text-white mb-0">KDA</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.kda, positionGroups[playerPosition], 'kda');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-2 py-1" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.9rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h3 fw-bold text-white mb-1">{avgMetrics.kda}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.kda, positionGroups[playerPosition], 'kda')}</small>
+                      {positionComparison?.positionAverage && (
+                        <div className="mt-1">
+                          <small className={`badge ${parseFloat(calculateComparisonPercentage(avgMetrics.kda, positionComparison.positionAverage.kda).replace('%', '')) >= 0 ? 'bg-success' : 'bg-danger'}`}>
+                            포지션 평균 대비 {calculateComparisonPercentage(avgMetrics.kda, positionComparison.positionAverage.kda)}
+                          </small>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div className="col-md-2">
-              <div className="card text-center h-100">
-                <div className="card-body">
-                  <h6 className="card-title text-warning">골드 효율성</h6>
-                  <div className="display-6 fw-bold">{avgMetrics.goldEfficiency}</div>
+
+                {/* 데미지 효율성 */}
+                <div className="col-6">
+                  <div className="card text-center" style={{ backgroundColor: '#1a1a1a', border: '1px solid #444' }}>
+                    <div className="card-body py-2">
+                      <div className="d-flex justify-content-between align-items-center mb-1">
+                        <h6 className="card-title text-white mb-0" style={{ fontSize: '0.8rem' }}>데미지 효율</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.damageEfficiency, positionGroups[playerPosition], 'damageEfficiency');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h5 fw-bold text-white mb-1">{avgMetrics.damageEfficiency}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.damageEfficiency, positionGroups[playerPosition], 'damageEfficiency')}</small>
+                      {positionComparison?.positionAverage && (
+                        <div className="mt-1">
+                          <small className={`badge ${parseFloat(calculateComparisonPercentage(avgMetrics.damageEfficiency, positionComparison.positionAverage.damageEfficiency).replace('%', '')) >= 0 ? 'bg-success' : 'bg-danger'}`} style={{ fontSize: '0.6rem' }}>
+                            {calculateComparisonPercentage(avgMetrics.damageEfficiency, positionComparison.positionAverage.damageEfficiency)}
+                          </small>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div className="col-md-3">
-              <div className="card text-center h-100">
-                <div className="card-body">
-                  <h6 className="card-title text-success">CS/분</h6>
-                  <div className="display-6 fw-bold">{avgMetrics.csPerMinute}</div>
-                  <small className="text-muted">실제 게임시간 기준</small>
+
+                {/* 골드 효율성 */}
+                <div className="col-6">
+                  <div className="card text-center" style={{ backgroundColor: '#1a1a1a', border: '1px solid #444' }}>
+                    <div className="card-body py-2">
+                      <div className="d-flex justify-content-between align-items-center mb-1">
+                        <h6 className="card-title text-white mb-0" style={{ fontSize: '0.8rem' }}>골드 효율</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.goldEfficiency, positionGroups[playerPosition], 'goldEfficiency');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h5 fw-bold text-white mb-1">{avgMetrics.goldEfficiency}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.goldEfficiency, positionGroups[playerPosition], 'goldEfficiency')}</small>
+                      {positionComparison?.positionAverage && (
+                        <div className="mt-1">
+                          <small className={`badge ${parseFloat(calculateComparisonPercentage(avgMetrics.goldEfficiency, positionComparison.positionAverage.goldEfficiency).replace('%', '')) >= 0 ? 'bg-success' : 'bg-danger'}`} style={{ fontSize: '0.6rem' }}>
+                            {calculateComparisonPercentage(avgMetrics.goldEfficiency, positionComparison.positionAverage.goldEfficiency)}
+                          </small>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div className="col-md-3">
-              <div className="card text-center h-100">
-                <div className="card-body">
-                  <h6 className="card-title text-info">시야 기여도</h6>
-                  <div className="display-6 fw-bold">{avgMetrics.visionContribution}<small>%</small></div>
+
+                {/* CS/분 */}
+                <div className="col-6">
+                  <div className="card text-center" style={{ backgroundColor: '#1a1a1a', border: '1px solid #444' }}>
+                    <div className="card-body py-2">
+                      <div className="d-flex justify-content-between align-items-center mb-1">
+                        <h6 className="card-title text-white mb-0" style={{ fontSize: '0.8rem' }}>CS/분</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.csPerMinute, positionGroups[playerPosition], 'csPerMinute');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h5 fw-bold text-white mb-1">{avgMetrics.csPerMinute}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.csPerMinute, positionGroups[playerPosition], 'csPerMinute')}</small>
+                      {positionComparison?.positionAverage && (
+                        <div className="mt-1">
+                          <small className={`badge ${parseFloat(calculateComparisonPercentage(avgMetrics.csPerMinute, positionComparison.positionAverage.csPerMinute).replace('%', '')) >= 0 ? 'bg-success' : 'bg-danger'}`} style={{ fontSize: '0.6rem' }}>
+                            {calculateComparisonPercentage(avgMetrics.csPerMinute, positionComparison.positionAverage.csPerMinute)}
+                          </small>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 시야 기여도 */}
+                <div className="col-6">
+                  <div className="card text-center" style={{ backgroundColor: '#1a1a1a', border: '1px solid #444' }}>
+                    <div className="card-body py-2">
+                      <div className="d-flex justify-content-between align-items-center mb-1">
+                        <h6 className="card-title text-white mb-0" style={{ fontSize: '0.8rem' }}>시야 기여</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.visionContribution, positionGroups[playerPosition], 'visionContribution');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h5 fw-bold text-white mb-1">{avgMetrics.visionContribution}%</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.visionContribution, positionGroups[playerPosition], 'visionContribution')}</small>
+                      {positionComparison?.positionAverage && (
+                        <div className="mt-1">
+                          <small className={`badge ${parseFloat(calculateComparisonPercentage(avgMetrics.visionContribution, positionComparison.positionAverage.visionContribution).replace('%', '')) >= 0 ? 'bg-success' : 'bg-danger'}`} style={{ fontSize: '0.6rem' }}>
+                            {calculateComparisonPercentage(avgMetrics.visionContribution, positionComparison.positionAverage.visionContribution)}
+                          </small>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
+          {/* 세부 지표들 */}
+          <div className="row g-3 mb-4">
+            <div className="col-md-3">
+              <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                <div className="card-body py-3">
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <h6 className="card-title text-white mb-0">초반 킬관여</h6>
+                    {(() => {
+                      const percentileScore = getPercentileValue(avgMetrics.earlyKillParticipation, positionGroups[playerPosition], 'earlyKillParticipation');
+                      const gradeInfo = getGradeFromPercentile(percentileScore);
+                      return (
+                        <span 
+                          className="badge fw-bold px-1 py-0" 
+                          style={{ 
+                            backgroundColor: gradeInfo.bgColor, 
+                            color: 'white',
+                            fontSize: '0.7rem'
+                          }}
+                        >
+                          {gradeInfo.grade}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <div className="h4 fw-bold text-warning mb-1">{avgMetrics.earlyKillParticipation}%</div>
+                  <small className="text-light">{calculatePercentile(avgMetrics.earlyKillParticipation, positionGroups[playerPosition], 'earlyKillParticipation')}</small>
+                </div>
+              </div>
+            </div>
+            
+            <div className="col-md-3">
+              <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                <div className="card-body py-3">
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <h6 className="card-title text-white mb-0">킬 관여율</h6>
+                    {(() => {
+                      const percentileScore = getPercentileValue(avgMetrics.killParticipation, positionGroups[playerPosition], 'killParticipation');
+                      const gradeInfo = getGradeFromPercentile(percentileScore);
+                      return (
+                        <span 
+                          className="badge fw-bold px-1 py-0" 
+                          style={{ 
+                            backgroundColor: gradeInfo.bgColor, 
+                            color: 'white',
+                            fontSize: '0.7rem'
+                          }}
+                        >
+                          {gradeInfo.grade}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <div className="h4 fw-bold text-info mb-1">{avgMetrics.killParticipation}%</div>
+                  <small className="text-light">{calculatePercentile(avgMetrics.killParticipation, positionGroups[playerPosition], 'killParticipation')}</small>
+                </div>
+              </div>
+            </div>
+
+            {playerPosition === "JUNGLE" && (
+              <>
+                <div className="col-md-3">
+                  <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                    <div className="card-body py-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="card-title text-white mb-0">정글 CS/분</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.jungleCSPerMinute, positionGroups[playerPosition], 'jungleCSPerMinute');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h4 fw-bold text-success mb-1">{avgMetrics.jungleCSPerMinute}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.jungleCSPerMinute, positionGroups[playerPosition], 'jungleCSPerMinute')}</small>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-md-3">
+                  <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                    <div className="card-body py-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="card-title text-white mb-0">카정 비율</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.counterJungleRate, positionGroups[playerPosition], 'counterJungleRate');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h4 fw-bold text-danger mb-1">{avgMetrics.counterJungleRate}%</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.counterJungleRate, positionGroups[playerPosition], 'counterJungleRate')}</small>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {playerPosition === "SUPPORT" && (
+              <>
+                <div className="col-md-3">
+                  <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                    <div className="card-body py-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="card-title text-white mb-0">와드 설치</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.wardsPlaced, positionGroups[playerPosition], 'wardsPlaced');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h4 fw-bold text-success mb-1">{avgMetrics.wardsPlaced}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.wardsPlaced, positionGroups[playerPosition], 'wardsPlaced')}</small>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-md-3">
+                  <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                    <div className="card-body py-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="card-title text-white mb-0">와드 제거</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.wardsKilled, positionGroups[playerPosition], 'wardsKilled');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h4 fw-bold text-warning mb-1">{avgMetrics.wardsKilled}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.wardsKilled, positionGroups[playerPosition], 'wardsKilled')}</small>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {(playerPosition !== "JUNGLE" && playerPosition !== "SUPPORT") && (
+              <>
+                <div className="col-md-3">
+                  <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                    <div className="card-body py-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="card-title text-white mb-0">데미지 효율</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.damageEfficiency, positionGroups[playerPosition], 'damageEfficiency');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h4 fw-bold text-info mb-1">{avgMetrics.damageEfficiency}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.damageEfficiency, positionGroups[playerPosition], 'damageEfficiency')}</small>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-md-3">
+                  <div className="card text-center" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                    <div className="card-body py-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="card-title text-white mb-0">골드 효율</h6>
+                        {(() => {
+                          const percentileScore = getPercentileValue(avgMetrics.goldEfficiency, positionGroups[playerPosition], 'goldEfficiency');
+                          const gradeInfo = getGradeFromPercentile(percentileScore);
+                          return (
+                            <span 
+                              className="badge fw-bold px-1 py-0" 
+                              style={{ 
+                                backgroundColor: gradeInfo.bgColor, 
+                                color: 'white',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {gradeInfo.grade}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="h4 fw-bold text-warning mb-1">{avgMetrics.goldEfficiency}</div>
+                      <small className="text-light">{calculatePercentile(avgMetrics.goldEfficiency, positionGroups[playerPosition], 'goldEfficiency')}</small>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
           {/* 사이드별 선호도 */}
           <div className="row mb-4">
             <div className="col-md-6">
-              <div className="card">
-                <div className="card-header">
-                  <h6 className="mb-0">
-                    <i className="bi bi-pie-chart"></i> 사이드별 선호도
+              <div className="card" style={{ backgroundColor: '#1a1a1a', border: 'none' }}>
+                <div className="card-header" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                  <h6 className="mb-0 text-white">
+                    <i className="bi bi-pie-chart me-2"></i>사이드별 선호도
                   </h6>
                 </div>
                 <div className="card-body">
                   <div className="row text-center">
                     <div className="col-6">
-                      <div className="border-end">
+                      <div className="border-end border-secondary">
                         <h5 className="text-primary">{sidePreference.blueWinRate}%</h5>
-                        <small className="text-muted">블루 사이드 승률</small>
+                        <small className="text-light">블루 사이드 승률</small>
                       </div>
                     </div>
                     <div className="col-6">
                       <h5 className="text-danger">{sidePreference.redWinRate}%</h5>
-                      <small className="text-muted">레드 사이드 승률</small>
+                      <small className="text-light">레드 사이드 승률</small>
                     </div>
                   </div>
                   <div className="mt-3 text-center">
@@ -346,36 +1416,36 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
             {/* 정글러 전용 지표 */}
             {isJungler && junglerMetrics.length > 0 && (
               <div className="col-md-6">
-                <div className="card">
-                  <div className="card-header">
-                    <h6 className="mb-0">
-                      <i className="bi bi-tree"></i> 정글러 전용 지표
+                <div className="card" style={{ backgroundColor: '#1a1a1a', border: 'none' }}>
+                  <div className="card-header" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                    <h6 className="mb-0 text-white">
+                      <i className="bi bi-tree me-2"></i>정글러 전용 지표
                     </h6>
                   </div>
                   <div className="card-body">
                     <div className="row g-2">
                       <div className="col-6">
-                        <div className="text-center p-2 bg-light rounded">
-                          <div className="fw-bold">{(junglerMetrics.reduce((sum, m) => sum + parseFloat(m.jungleCSPerMinute), 0) / junglerMetrics.length).toFixed(1)}</div>
-                          <small className="text-muted">정글 CS/분</small>
+                        <div className="text-center p-2 rounded" style={{ backgroundColor: '#2a2a2a' }}>
+                          <div className="fw-bold text-white">{(junglerMetrics.reduce((sum, m) => sum + parseFloat(m.jungleCSPerMinute), 0) / junglerMetrics.length).toFixed(1)}</div>
+                          <small className="text-light">정글 CS/분</small>
                         </div>
                       </div>
                       <div className="col-6">
-                        <div className="text-center p-2 bg-light rounded">
-                          <div className="fw-bold">{(junglerMetrics.reduce((sum, m) => sum + parseFloat(m.counterJungleRate), 0) / junglerMetrics.length).toFixed(1)}%</div>
-                          <small className="text-muted">상대 정글 침입률</small>
+                        <div className="text-center p-2 rounded" style={{ backgroundColor: '#2a2a2a' }}>
+                          <div className="fw-bold text-white">{(junglerMetrics.reduce((sum, m) => sum + parseFloat(m.counterJungleRate), 0) / junglerMetrics.length).toFixed(1)}%</div>
+                          <small className="text-light">상대 정글 침입률</small>
                         </div>
                       </div>
                       <div className="col-6">
-                        <div className="text-center p-2 bg-light rounded">
-                          <div className="fw-bold">{(junglerMetrics.reduce((sum, m) => sum + parseFloat(m.ownJungleControl), 0) / junglerMetrics.length).toFixed(1)}%</div>
-                          <small className="text-muted">자체 정글 장악률</small>
+                        <div className="text-center p-2 rounded" style={{ backgroundColor: '#2a2a2a' }}>
+                          <div className="fw-bold text-white">{(junglerMetrics.reduce((sum, m) => sum + parseFloat(m.ownJungleControl), 0) / junglerMetrics.length).toFixed(1)}%</div>
+                          <small className="text-light">자체 정글 장악률</small>
                         </div>
                       </div>
                       <div className="col-6">
-                        <div className="text-center p-2 bg-light rounded">
-                          <div className="fw-bold">{junglerMetrics.filter(m => m.jungleInvasionSuccess === "성공").length}/{junglerMetrics.length}</div>
-                          <small className="text-muted">정글 침입 성공</small>
+                        <div className="text-center p-2 rounded" style={{ backgroundColor: '#2a2a2a' }}>
+                          <div className="fw-bold text-white">{junglerMetrics.filter(m => m.jungleInvasionSuccess === "성공").length}/{junglerMetrics.length}</div>
+                          <small className="text-light">정글 침입 성공</small>
                         </div>
                       </div>
                     </div>
@@ -385,38 +1455,67 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
             )}
           </div>
 
-          {/* 개선점 제안 */}
-          <div className="mb-4">
-            <h6>
-              <i className="bi bi-lightbulb"></i> 개선점 제안
-            </h6>
-            {improvements.length > 0 ? (
-              <div className="row g-3">
-                {improvements.map((improvement, index) => (
-                  <div key={index} className="col-md-6">
-                    <div className="card border-warning h-100">
-                      <div className="card-body">
-                        <div className="d-flex align-items-center mb-2">
-                          <i className="bi bi-exclamation-triangle text-warning me-2"></i>
-                          <h6 className="card-title mb-0">{improvement.category}</h6>
+          {/* 개선점 & 강점 제안 */}
+          <div className="row mb-4">
+            {/* 개선점 */}
+            <div className="col-md-6">
+              <h6 className="text-warning">
+                <i className="bi bi-arrow-up-circle me-2"></i>개선 필요 영역
+              </h6>
+              {analysisResult.improvements.length > 0 ? (
+                <div className="row g-2">
+                  {analysisResult.improvements.map((improvement, index) => (
+                    <div key={index} className="col-12">
+                      <div className="card border-warning" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-body py-2">
+                          <div className="d-flex justify-content-between align-items-center">
+                            <div>
+                              <span className="badge bg-warning text-dark me-2">{improvement.category}</span>
+                              <small className="text-light">{improvement.metric}</small>
+                            </div>
+                          </div>
+                          <small className="text-white mt-1 d-block">💡 {improvement.suggestion}</small>
                         </div>
-                        <p className="card-text mb-2">
-                          <small className="text-muted">{improvement.issue}</small>
-                        </p>
-                        <p className="card-text">
-                          <strong>💡 제안:</strong> {improvement.suggestion}
-                        </p>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="alert alert-success">
-                <i className="bi bi-check-circle me-2"></i>
-                모든 지표가 평균 이상입니다! 현재 플레이를 유지하세요.
-              </div>
-            )}
+                  ))}
+                </div>
+              ) : (
+                <div className="alert alert-success" style={{ backgroundColor: '#1a1a1a', border: '1px solid #28a745' }}>
+                  <small className="text-light">모든 지표가 평균 이상입니다!</small>
+                </div>
+              )}
+            </div>
+
+            {/* 강점 */}
+            <div className="col-md-6">
+              <h6 className="text-success">
+                <i className="bi bi-star me-2"></i>주요 강점
+              </h6>
+              {analysisResult.strengths.length > 0 ? (
+                <div className="row g-2">
+                  {analysisResult.strengths.map((strength, index) => (
+                    <div key={index} className="col-12">
+                      <div className="card border-success" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-body py-2">
+                          <div className="d-flex justify-content-between align-items-center">
+                            <div>
+                              <span className="badge bg-success me-2">{strength.category}</span>
+                              <small className="text-light">{strength.metric}</small>
+                            </div>
+                          </div>
+                          <small className="text-white mt-1 d-block">⭐ {strength.description}</small>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="alert alert-info" style={{ backgroundColor: '#1a1a1a', border: '1px solid #17a2b8' }}>
+                  <small className="text-light">특별한 강점이 발견되지 않았습니다.</small>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -424,39 +1523,39 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
       {/* 포지션 비교 탭 */}
       {activeTab === "position" && (
         <div>
-          {positionComparison ? (
+          {unifiedPositionComparison ? (
             <div>
               {/* 정글러 전용 비교 */}
-              {positionComparison.position === "JUNGLE" && (
+              {unifiedPositionComparison.position === "JUNGLE" && (
                 <div>
                   <div className="row g-3 mb-3">
                     {/* 정글 CS/분 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-warning text-white text-center py-2">
-                          <h6 className="mb-0">
-                            <i className="bi bi-speedometer2 me-2"></i>
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                          <h6 className="mb-0 text-white">
+                            <i className="bi bi-tree me-2"></i>
                             정글 CS/분
                           </h6>
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-warning mb-1">
                                 {avgMetrics.jungleCSPerMinute}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.jungleCSPerMinute || "N/A"}
+                                {directPosAverages?.jungleCSPerMinute || "N/A"}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-warning text-dark fs-6 px-2 py-1">
-                              {positionComparison.rankings.jungleCSPerMinute || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.jungleCSPerMinute || "순위 계산 중"}
                             </span>
                           </div>
                         </div>
@@ -465,8 +1564,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 카정 비율 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-danger text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-crosshair me-2"></i>
                             카정 비율
@@ -474,22 +1573,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-danger mb-1">
                                 {avgMetrics.counterJungleRate}%
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.counterJungleRate || "N/A"}%
+                                {directPosAverages?.counterJungleRate || "N/A"}%
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-danger fs-6 px-2 py-1">
-                              {positionComparison.rankings.counterJungleRate || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.counterJungleRate || "순위 계산 중"}
                             </span>
                           </div>
                         </div>
@@ -498,8 +1597,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 풀캠 비율 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-success text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-shield-check me-2"></i>
                             풀캠 비율
@@ -507,22 +1606,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-success mb-1">
                                 {avgMetrics.ownJungleControl}%
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.ownJungleControl || "N/A"}%
+                                {directPosAverages?.ownJungleControl || "N/A"}%
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-success fs-6 px-2 py-1">
-                              {positionComparison.rankings.ownJungleControl || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.ownJungleControl || "순위 계산 중"}
                             </span>
                           </div>
                         </div>
@@ -531,8 +1630,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* KDA */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-primary text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-award me-2"></i>
                             KDA
@@ -540,22 +1639,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-primary mb-1">
-                                {positionComparison.playerMetrics.kda}
+                                {unifiedPositionComparison.playerMetrics.kda}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.kda}
+                                {directPosAverages.kda}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-primary fs-6 px-2 py-1">
-                              {positionComparison.rankings.kda}
+                              {unifiedPositionComparison.rankings.kda}
                             </span>
                           </div>
                         </div>
@@ -564,8 +1663,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 15분 이전 킬관여율 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-info text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-clock me-2"></i>
                             15분전 킬관여율
@@ -573,22 +1672,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-info mb-1">
                                 {avgMetrics.earlyKillParticipation}%
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.earlyKillParticipation || "N/A"}%
+                                {directPosAverages.earlyKillParticipation || "N/A"}%
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-info fs-6 px-2 py-1">
-                              {positionComparison.rankings.earlyKillParticipation || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.earlyKillParticipation || "순위 계산 중"}
                             </span>
                           </div>
                         </div>
@@ -597,8 +1696,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 킬관여율 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-dark text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-people me-2"></i>
                             킬관여율
@@ -606,22 +1705,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
-                              <div className="h3 fw-bold text-dark mb-1">
-                                {positionComparison.playerMetrics.killParticipation}%
+                            <div className="col-6 border-end border-secondary">
+                              <div className="h3 fw-bold text-white mb-1">
+                                {unifiedPositionComparison.playerMetrics.killParticipation}%
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.killParticipation}%
+                                {directPosAverages.killParticipation}%
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
-                            <span className="badge bg-dark fs-6 px-2 py-1">
-                              {positionComparison.rankings.killParticipation}
+                            <span className="badge bg-secondary fs-6 px-2 py-1">
+                              {unifiedPositionComparison.rankings.killParticipation}
                             </span>
                           </div>
                         </div>
@@ -632,13 +1731,13 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
               )}
 
               {/* 서포터 전용 비교 */}
-              {positionComparison.position === "SUPPORT" && (
+              {unifiedPositionComparison.position === "SUPPORT" && (
                 <div>
                   <div className="row g-3 mb-3">
                     {/* 시야 설치 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-success text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-eye me-2"></i>
                             시야 설치
@@ -646,22 +1745,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-success mb-1">
                                 {avgMetrics.wardsPlaced}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.wardsPlaced || "N/A"}
+                                {directPosAverages?.wardsPlaced || "N/A"}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-success fs-6 px-2 py-1">
-                              {positionComparison.rankings.wardsPlaced || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.wardsPlaced || "순위 계산 중"}
                             </span>
                           </div>
                         </div>
@@ -670,8 +1769,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 시야 제거 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-danger text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-eye-slash me-2"></i>
                             시야 제거
@@ -679,22 +1778,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-danger mb-1">
                                 {avgMetrics.wardsKilled}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.wardsKilled || "N/A"}
+                                {directPosAverages?.wardsKilled || "N/A"}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-danger fs-6 px-2 py-1">
-                              {positionComparison.rankings.wardsKilled || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.wardsKilled || "순위 계산 중"}
                             </span>
                           </div>
                         </div>
@@ -703,8 +1802,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* KDA */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-primary text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-award me-2"></i>
                             KDA
@@ -712,22 +1811,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-primary mb-1">
-                                {positionComparison.playerMetrics.kda}
+                                {unifiedPositionComparison.playerMetrics.kda}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.kda}
+                                {directPosAverages.kda}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-primary fs-6 px-2 py-1">
-                              {positionComparison.rankings.kda}
+                              {unifiedPositionComparison.rankings.kda}
                             </span>
                           </div>
                         </div>
@@ -736,8 +1835,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 15분 이전 킬관여율 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-info text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-clock me-2"></i>
                             15분전 킬관여율
@@ -745,22 +1844,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-info mb-1">
                                 {avgMetrics.earlyKillParticipation}%
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.earlyKillParticipation || "N/A"}%
+                                {directPosAverages.earlyKillParticipation || "N/A"}%
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-info fs-6 px-2 py-1">
-                              {positionComparison.rankings.earlyKillParticipation || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.earlyKillParticipation || "순위 계산 중"}
                             </span>
                           </div>
                         </div>
@@ -769,8 +1868,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 킬관여율 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-dark text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-people me-2"></i>
                             킬관여율
@@ -778,22 +1877,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
-                              <div className="h3 fw-bold text-dark mb-1">
-                                {positionComparison.playerMetrics.killParticipation}%
+                            <div className="col-6 border-end border-secondary">
+                              <div className="h3 fw-bold text-white mb-1">
+                                {unifiedPositionComparison.playerMetrics.killParticipation}%
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.killParticipation}%
+                                {directPosAverages.killParticipation}%
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
-                            <span className="badge bg-dark fs-6 px-2 py-1">
-                              {positionComparison.rankings.killParticipation}
+                            <span className="badge bg-secondary fs-6 px-2 py-1">
+                              {unifiedPositionComparison.rankings.killParticipation}
                             </span>
                           </div>
                         </div>
@@ -804,13 +1903,13 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
               )}
 
               {/* 기타 포지션 (TOP, MIDDLE, BOTTOM) */}
-              {!["JUNGLE", "SUPPORT"].includes(positionComparison.position) && (
+              {!["JUNGLE", "SUPPORT"].includes(unifiedPositionComparison.position) && (
                 <div>
                   <div className="row g-3 mb-3">
                     {/* KDA */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-primary text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-award me-2"></i>
                             KDA
@@ -818,22 +1917,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-primary mb-1">
-                                {positionComparison.playerMetrics.kda}
+                                {unifiedPositionComparison.playerMetrics.kda}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.kda}
+                                {directPosAverages.kda}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-primary fs-6 px-2 py-1">
-                              {positionComparison.rankings.kda}
+                              {unifiedPositionComparison.rankings.kda}
                             </span>
                           </div>
                         </div>
@@ -842,8 +1941,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 데미지 효율성 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-danger text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-lightning me-2"></i>
                             데미지 효율성
@@ -851,22 +1950,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-danger mb-1">
-                                {positionComparison.playerMetrics.damageEfficiency}
+                                {unifiedPositionComparison.playerMetrics.damageEfficiency}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.damageEfficiency}
+                                {directPosAverages.damageEfficiency}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-danger fs-6 px-2 py-1">
-                              {positionComparison.rankings.damageEfficiency}
+                              {unifiedPositionComparison.rankings.damageEfficiency}
                             </span>
                           </div>
                         </div>
@@ -875,8 +1974,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* 골드 효율성 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-warning text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-coin me-2"></i>
                             골드 효율성
@@ -884,22 +1983,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-warning mb-1">
-                                {positionComparison.playerMetrics.goldEfficiency}
+                                {unifiedPositionComparison.playerMetrics.goldEfficiency}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.goldEfficiency}
+                                {directPosAverages.goldEfficiency}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-warning text-dark fs-6 px-2 py-1">
-                              {positionComparison.rankings.goldEfficiency || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.goldEfficiency || "순위 계산 중"}
                             </span>
                           </div>
                         </div>
@@ -908,8 +2007,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                     {/* CS/분 */}
                     <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-success text-white text-center py-2">
+                      <div className="card h-100 border-0 shadow-sm" style={{ backgroundColor: '#1a1a1a' }}>
+                        <div className="card-header text-white text-center py-2" style={{ backgroundColor: '#2a2a2a' }}>
                           <h6 className="mb-0">
                             <i className="bi bi-graph-up me-2"></i>
                             CS/분
@@ -917,88 +2016,22 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         </div>
                         <div className="card-body text-center py-3">
                           <div className="row align-items-center">
-                            <div className="col-6 border-end">
+                            <div className="col-6 border-end border-secondary">
                               <div className="h3 fw-bold text-success mb-1">
-                                {positionComparison.playerMetrics.csPerMinute}
+                                {unifiedPositionComparison.playerMetrics.csPerMinute}
                               </div>
-                              <small className="text-muted">내 성과</small>
+                              <small className="text-light">내 성과</small>
                             </div>
                             <div className="col-6">
                               <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.csPerMinute}
+                                {directPosAverages.csPerMinute}
                               </div>
-                              <small className="text-muted">포지션 평균</small>
+                              <small className="text-light">포지션 평균</small>
                             </div>
                           </div>
                           <div className="mt-3">
                             <span className="badge bg-success fs-6 px-2 py-1">
-                              {positionComparison.rankings.csPerMinute}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 킬관여율 */}
-                    <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-dark text-white text-center py-2">
-                          <h6 className="mb-0">
-                            <i className="bi bi-people me-2"></i>
-                            킬관여율
-                          </h6>
-                        </div>
-                        <div className="card-body text-center py-3">
-                          <div className="row align-items-center">
-                            <div className="col-6 border-end">
-                              <div className="h3 fw-bold text-dark mb-1">
-                                {positionComparison.playerMetrics.killParticipation}%
-                              </div>
-                              <small className="text-muted">내 성과</small>
-                            </div>
-                            <div className="col-6">
-                              <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.killParticipation}%
-                              </div>
-                              <small className="text-muted">포지션 평균</small>
-                            </div>
-                          </div>
-                          <div className="mt-3">
-                            <span className="badge bg-dark fs-6 px-2 py-1">
-                              {positionComparison.rankings.killParticipation}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 15분 이전 킬관여율 */}
-                    <div className="col-lg-4 col-md-6">
-                      <div className="card h-100 border-0 shadow-sm">
-                        <div className="card-header bg-info text-white text-center py-2">
-                          <h6 className="mb-0">
-                            <i className="bi bi-clock me-2"></i>
-                            15분전 킬관여율
-                          </h6>
-                        </div>
-                        <div className="card-body text-center py-3">
-                          <div className="row align-items-center">
-                            <div className="col-6 border-end">
-                              <div className="h3 fw-bold text-info mb-1">
-                                {avgMetrics.earlyKillParticipation}%
-                              </div>
-                              <small className="text-muted">내 성과</small>
-                            </div>
-                            <div className="col-6">
-                              <div className="h4 text-secondary mb-1">
-                                {positionComparison.averageMetrics.earlyKillParticipation || "N/A"}%
-                              </div>
-                              <small className="text-muted">포지션 평균</small>
-                            </div>
-                          </div>
-                          <div className="mt-3">
-                            <span className="badge bg-info fs-6 px-2 py-1">
-                              {positionComparison.rankings.earlyKillParticipation || "순위 계산 중"}
+                              {unifiedPositionComparison.rankings.csPerMinute}
                             </span>
                           </div>
                         </div>
@@ -1009,14 +2042,14 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
               )}
 
               {/* 종합 평가 */}
-              <div className="card border-0 bg-light">
+              <div className="card border-0" style={{ backgroundColor: '#1a1a1a' }}>
                 <div className="card-body text-center py-4">
-                  <h5 className="mb-3">
+                  <h5 className="mb-3 text-white">
                     <i className="bi bi-clipboard-check me-2"></i>
                     종합 평가
                   </h5>
-                  <p className="mb-0 fs-6">
-                    <strong>{positionComparison.position}</strong> 포지션에서 총 <strong>{positionComparison.comparedPlayers + 1}명</strong>의 플레이어와 비교한 결과입니다.
+                  <p className="mb-0 fs-6 text-light">
+                    <strong className="text-white">{unifiedPositionComparison.position}</strong> 포지션에서 총 <strong className="text-white">{unifiedPositionComparison.comparedPlayers + 1}명</strong>의 플레이어와 비교한 결과입니다.
                   </p>
                 </div>
               </div>
@@ -1034,17 +2067,17 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
       {/* 폼 분석 탭 */}
       {activeTab === "form" && (
         <div>
-          <h5>폼 분석</h5>
+          <h5 className="text-white">폼 분석</h5>
           {formAnalysis ? (
             <div>
               {/* 분석 정보 */}
-              <div className="alert alert-info mb-4">
+              <div className="alert mb-4" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333', color: '#fff' }}>
                 <div className="row align-items-center">
                   <div className="col-md-8">
-                    <h6 className="mb-1">
+                    <h6 className="mb-1 text-white">
                       <i className="bi bi-graph-up"></i> 최근 성과 vs 전체 평균
                     </h6>
-                    <small>최근 {formAnalysis.gamesAnalyzed.recent}게임과 전체 {formAnalysis.gamesAnalyzed.total}게임의 성과를 비교합니다</small>
+                    <small className="text-light">최근 {formAnalysis.gamesAnalyzed.recent}게임과 전체 {formAnalysis.gamesAnalyzed.total}게임의 성과를 비교합니다</small>
                   </div>
                   <div className="col-md-4 text-end">
                     <span className="badge bg-primary fs-6">폼 분석</span>
@@ -1056,13 +2089,13 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
               <div className="row g-3 mb-4">
                 {/* KDA 비교 */}
                 <div className="col-md-3">
-                  <div className="card h-100">
+                  <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
                     <div className="card-body text-center">
                       <h6 className="card-title text-primary">KDA</h6>
-                      <div className="display-6 fw-bold text-dark mb-2">
+                      <div className="display-6 fw-bold text-white mb-2">
                         {formAnalysis.recent.kda.toFixed(2)}
                       </div>
-                      <div className="text-muted mb-2">
+                      <div className="text-light mb-2">
                         전체: {formAnalysis.overall.kda.toFixed(2)}
                       </div>
                       <span className={`badge fs-6 ${parseFloat(formAnalysis.improvement.kda) >= 0 ? 'bg-success' : 'bg-danger'}`}>
@@ -1085,13 +2118,13 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                 {/* 데미지 효율성 비교 */}
                 <div className="col-md-3">
-                  <div className="card h-100">
+                  <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
                     <div className="card-body text-center">
                       <h6 className="card-title text-danger">데미지 효율성</h6>
-                      <div className="display-6 fw-bold text-dark mb-2">
+                      <div className="display-6 fw-bold text-white mb-2">
                         {formAnalysis.recent.damageEfficiency.toFixed(2)}
                       </div>
-                      <div className="text-muted mb-2">
+                      <div className="text-light mb-2">
                         전체: {formAnalysis.overall.damageEfficiency.toFixed(2)}
                       </div>
                       <span className={`badge fs-6 ${parseFloat(formAnalysis.improvement.damageEfficiency) >= 0 ? 'bg-success' : 'bg-danger'}`}>
@@ -1114,13 +2147,13 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                 {/* 골드 효율성 비교 */}
                 <div className="col-md-3">
-                  <div className="card h-100">
+                  <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
                     <div className="card-body text-center">
                       <h6 className="card-title text-warning">골드 효율성</h6>
-                      <div className="display-6 fw-bold text-dark mb-2">
+                      <div className="display-6 fw-bold text-white mb-2">
                         {formAnalysis.recent.goldEfficiency.toFixed(2)}
                       </div>
-                      <div className="text-muted mb-2">
+                      <div className="text-light mb-2">
                         전체: {formAnalysis.overall.goldEfficiency.toFixed(2)}
                       </div>
                       <span className={`badge fs-6 ${parseFloat(formAnalysis.improvement.goldEfficiency) >= 0 ? 'bg-success' : 'bg-danger'}`}>
@@ -1143,13 +2176,13 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
                 {/* CS/분 비교 */}
                 <div className="col-md-3">
-                  <div className="card h-100">
+                  <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
                     <div className="card-body text-center">
                       <h6 className="card-title text-success">CS/분</h6>
-                      <div className="display-6 fw-bold text-dark mb-2">
+                      <div className="display-6 fw-bold text-white mb-2">
                         {formAnalysis.recent.csPerMinute.toFixed(1)}
                       </div>
-                      <div className="text-muted mb-2">
+                      <div className="text-light mb-2">
                         전체: {formAnalysis.overall.csPerMinute.toFixed(1)}
                       </div>
                       <span className={`badge fs-6 ${parseFloat(formAnalysis.improvement.csPerMinute) >= 0 ? 'bg-success' : 'bg-danger'}`}>
@@ -1172,9 +2205,9 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
               </div>
 
               {/* 종합 폼 평가 */}
-              <div className="card border-0 bg-light">
+              <div className="card border-0" style={{ backgroundColor: '#1a1a1a' }}>
                 <div className="card-body">
-                  <h6 className="card-title">
+                  <h6 className="card-title text-white">
                     <i className="bi bi-speedometer2"></i> 종합 폼 평가
                   </h6>
                   <div className="row">
@@ -1196,7 +2229,7 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                         
                         return (
                           <>
-                            <p className="mb-2">
+                            <p className="mb-2 text-light">
                               {improvingCount}/4 지표에서 최근 성과가 전체 평균보다 향상되었습니다.
                             </p>
                             <div className="progress" style={{height: '20px'}}>
@@ -1243,10 +2276,10 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
           ) : (
             <div className="text-center py-5">
               <div className="mb-3">
-                <i className="bi bi-graph-down text-muted" style={{fontSize: '3rem'}}></i>
+                <i className="bi bi-graph-down text-light" style={{fontSize: '3rem'}}></i>
               </div>
               <h6>폼 분석 데이터 부족</h6>
-              <p className="text-muted">
+              <p className="text-light">
                 폼 분석을 위한 충분한 게임 데이터가 없습니다.<br/>
                 최소 5게임 이상의 데이터가 필요합니다.
               </p>
@@ -1258,13 +2291,13 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
       {/* 챔피언 분석 탭 */}
       {activeTab === "champion" && (
         <div>
-          <h5>챔피언별 성능 분석</h5>
+          <h5 className="text-white">챔피언별 성능 분석</h5>
           {Object.keys(championPerformance).length > 0 ? (
             <div className="row g-3">
               {Object.entries(championPerformance).map(([champion, data]) => (
                 <div key={champion} className="col-md-6 col-lg-4 mb-4">
-                  <div className="card h-100">
-                    <div className="card-header bg-primary text-white">
+                  <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
+                    <div className="card-header text-white" style={{ backgroundColor: '#2a2a2a' }}>
                       <h6 className="mb-0">
                         <i className="bi bi-person-circle me-2"></i>
                         {champion}
@@ -1274,35 +2307,35 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                       {/* 기본 통계 */}
                       <div className="row text-center mb-3">
                         <div className="col-4">
-                          <div className="border-end">
+                          <div className="border-end border-secondary">
                             <h5 className="text-primary mb-1">{data.length}</h5>
-                            <small className="text-muted">게임</small>
+                            <small className="text-light">게임</small>
                           </div>
                         </div>
                         <div className="col-4">
-                          <div className="border-end">
+                          <div className="border-end border-secondary">
                             <h5 className="text-success mb-1">
                               {((data.filter(g => g.win).length / data.length) * 100).toFixed(0)}%
                             </h5>
-                            <small className="text-muted">승률</small>
+                            <small className="text-light">승률</small>
                           </div>
                         </div>
                         <div className="col-4">
                           <h5 className="text-warning mb-1">
                             {(data.reduce((sum, g) => sum + parseFloat(g.kda), 0) / data.length).toFixed(1)}
                           </h5>
-                          <small className="text-muted">평균 KDA</small>
+                          <small className="text-light">평균 KDA</small>
                         </div>
                       </div>
 
                       {/* 트렌드 정보 */}
                       {data.trend && (
                         <div className="mt-3">
-                          <h6 className="text-muted mb-2">성장 트렌드</h6>
+                          <h6 className="text-light mb-2">성장 트렌드</h6>
                           <div className="row">
                             <div className="col-6">
                               <div className="d-flex align-items-center">
-                                <span className="me-2">KDA:</span>
+                                <span className="me-2 text-white">KDA:</span>
                                 <span className={`badge ${parseFloat(data.trend.kdaImprovement) >= 0 ? 'bg-success' : 'bg-danger'}`}>
                                   {data.trend.kdaImprovement > 0 ? '+' : ''}{data.trend.kdaImprovement}
                                 </span>
@@ -1310,7 +2343,7 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                             </div>
                             <div className="col-6">
                               <div className="d-flex align-items-center">
-                                <span className="me-2">승률:</span>
+                                <span className="me-2 text-white">승률:</span>
                                 <span className={`badge ${parseFloat(data.trend.winRateImprovement) >= 0 ? 'bg-success' : 'bg-danger'}`}>
                                   {data.trend.winRateImprovement > 0 ? '+' : ''}{data.trend.winRateImprovement}%
                                 </span>
@@ -1345,10 +2378,10 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
           ) : (
             <div className="text-center py-5">
               <div className="mb-3">
-                <i className="bi bi-person-x text-muted" style={{fontSize: '3rem'}}></i>
+                <i className="bi bi-person-x text-light" style={{fontSize: '3rem'}}></i>
               </div>
               <h6>챔피언 데이터 없음</h6>
-              <p className="text-muted">
+              <p className="text-light">
                 분석할 챔피언 데이터가 없습니다.<br/>
                 게임을 더 플레이해주세요.
               </p>
@@ -1357,17 +2390,17 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
         </div>
       )}
 
-      {/* 플레이 스타일 탭 */}
+      {/* 포지션 내 백분위 순위 탭 */}
       {activeTab === "style" && (
         <div>
-          <h5>플레이 스타일 분석</h5>
+          <h5 className="text-white">포지션 내 백분위 순위 분석</h5>
           <div className="row g-3">
-            {/* 시야 플레이 스타일 */}
+            {/* 시야 포지션 내 백분위 순위 */}
             <div className="col-md-6">
-              <div className="card h-100">
-                <div className="card-header">
-                  <h6 className="mb-0">
-                    <i className="bi bi-eye"></i> 시야 플레이 스타일
+              <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
+                <div className="card-header" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                  <h6 className="mb-0 text-white">
+                    <i className="bi bi-eye"></i> 시야 포지션 내 백분위 순위
                   </h6>
                 </div>
                 <div className="card-body">
@@ -1377,14 +2410,14 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                   
                   <div className="row text-center mb-3">
                     <div className="col-6">
-                      <div className="border-end">
+                      <div className="border-end border-secondary">
                         <h5 className="text-success mb-1">{visionStyle.wardsPlacedAvg}</h5>
-                        <small className="text-muted">평균 와드 설치</small>
+                        <small className="text-light">평균 와드 설치</small>
                       </div>
                     </div>
                     <div className="col-6">
                       <h5 className="text-danger mb-1">{visionStyle.wardsKilledAvg}</h5>
-                      <small className="text-muted">평균 와드 제거</small>
+                      <small className="text-light">평균 와드 제거</small>
                     </div>
                   </div>
 
@@ -1395,16 +2428,16 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                   </div>
 
                   {/* 스타일별 설명 */}
-                  <div className="mt-3 p-3 bg-light rounded">
-                    <small className="text-muted">
+                  <div className="mt-3 p-3 rounded" style={{ backgroundColor: '#2a2a2a' }}>
+                    <small className="text-light">
                       {visionStyle.style === "수비형 (와드 설치 중심)" && 
-                        "팀의 시야 확보에 중점을 두는 안정적인 플레이 스타일입니다."
+                        "팀의 시야 확보에 중점을 두는 안정적인 포지션 내 백분위 순위입니다."
                       }
                       {visionStyle.style === "공격형 (와드 제거 중심)" && 
-                        "상대방의 시야를 차단하는 공격적인 플레이 스타일입니다."
+                        "상대방의 시야를 차단하는 공격적인 포지션 내 백분위 순위입니다."
                       }
                       {visionStyle.style === "균형형" && 
-                        "와드 설치와 제거를 균형있게 하는 안정적인 플레이 스타일입니다."
+                        "와드 설치와 제거를 균형있게 하는 안정적인 포지션 내 백분위 순위입니다."
                       }
                     </small>
                   </div>
@@ -1414,9 +2447,9 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
             {/* 사이드별 성과 상세 */}
             <div className="col-md-6">
-              <div className="card h-100">
-                <div className="card-header">
-                  <h6 className="mb-0">
+              <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
+                <div className="card-header" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                  <h6 className="mb-0 text-white">
                     <i className="bi bi-diagram-3"></i> 사이드별 성과 상세
                   </h6>
                 </div>
@@ -1428,7 +2461,7 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                   {/* 사이드별 승률 비교 */}
                   <div className="mb-3">
                     <div className="d-flex justify-content-between align-items-center mb-2">
-                      <span>블루 사이드</span>
+                      <span className="text-white">블루 사이드</span>
                       <span className="fw-bold text-primary">{sidePreference.blueWinRate}%</span>
                     </div>
                     <div className="progress mb-3" style={{height: '8px'}}>
@@ -1439,7 +2472,7 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                     </div>
 
                     <div className="d-flex justify-content-between align-items-center mb-2">
-                      <span>레드 사이드</span>
+                      <span className="text-white">레드 사이드</span>
                       <span className="fw-bold text-danger">{sidePreference.redWinRate}%</span>
                     </div>
                     <div className="progress mb-3" style={{height: '8px'}}>
@@ -1457,8 +2490,8 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                   </div>
 
                   {/* 사이드별 조언 */}
-                  <div className="mt-3 p-3 bg-light rounded">
-                    <small className="text-muted">
+                  <div className="mt-3 p-3 rounded" style={{ backgroundColor: '#2a2a2a' }}>
+                    <small className="text-light">
                       {parseFloat(sidePreference.difference) > 20 && 
                         "특정 사이드에서 현저히 좋은 성과를 보이고 있습니다. 해당 사이드의 장점을 분석해보세요."
                       }
@@ -1485,50 +2518,50 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
           {/* 오브젝트별 승률 카드들 */}
           <div className="row g-3 mb-4">
             <div className="col-md-3">
-              <div className="card text-center h-100">
+              <div className="card text-center h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
                 <div className="card-body">
                   <div className="mb-2">
                     <i className="bi bi-trophy text-warning" style={{fontSize: '2rem'}}></i>
                   </div>
-                  <h6 className="card-title">바론</h6>
+                  <h6 className="card-title text-white">바론</h6>
                   <h4 className="text-warning">{objectiveStats.baron.winRate}%</h4>
-                  <small className="text-muted">{objectiveStats.baron.games}게임 참여</small>
+                  <small className="text-light">{objectiveStats.baron.games}게임 참여</small>
                 </div>
               </div>
             </div>
             <div className="col-md-3">
-              <div className="card text-center h-100">
+              <div className="card text-center h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
                 <div className="card-body">
                   <div className="mb-2">
                     <i className="bi bi-fire text-danger" style={{fontSize: '2rem'}}></i>
                   </div>
-                  <h6 className="card-title">드래곤</h6>
+                  <h6 className="card-title text-white">드래곤</h6>
                   <h4 className="text-danger">{objectiveStats.dragon.winRate}%</h4>
-                  <small className="text-muted">{objectiveStats.dragon.games}게임 참여</small>
+                  <small className="text-light">{objectiveStats.dragon.games}게임 참여</small>
                 </div>
               </div>
             </div>
             <div className="col-md-3">
-              <div className="card text-center h-100">
+              <div className="card text-center h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
                 <div className="card-body">
                   <div className="mb-2">
                     <i className="bi bi-eye text-primary" style={{fontSize: '2rem'}}></i>
                   </div>
-                  <h6 className="card-title">전령</h6>
+                  <h6 className="card-title text-white">전령</h6>
                   <h4 className="text-primary">{objectiveStats.herald.winRate}%</h4>
-                  <small className="text-muted">{objectiveStats.herald.games}게임 참여</small>
+                  <small className="text-light">{objectiveStats.herald.games}게임 참여</small>
                 </div>
               </div>
             </div>
             <div className="col-md-3">
-              <div className="card text-center h-100">
+              <div className="card text-center h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
                 <div className="card-body">
                   <div className="mb-2">
                     <i className="bi bi-bug text-success" style={{fontSize: '2rem'}}></i>
                   </div>
-                  <h6 className="card-title">유충</h6>
+                  <h6 className="card-title text-white">유충</h6>
                   <h4 className="text-success">{objectiveStats.voidgrub.winRate}%</h4>
-                  <small className="text-muted">{objectiveStats.voidgrub.games}게임 참여</small>
+                  <small className="text-light">{objectiveStats.voidgrub.games}게임 참여</small>
                 </div>
               </div>
             </div>
@@ -1537,9 +2570,9 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
           <div className="row g-3">
             {/* 오브젝트 우선순위 */}
             <div className="col-md-6">
-              <div className="card h-100">
-                <div className="card-header">
-                  <h6 className="mb-0">
+              <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
+                <div className="card-header" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                  <h6 className="mb-0 text-white">
                     <i className="bi bi-list-ol"></i> 오브젝트 우선순위
                   </h6>
                 </div>
@@ -1547,7 +2580,7 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                   {objectivePriority.priority && objectivePriority.priority.length > 0 ? (
                     <div className="list-group list-group-flush">
                       {objectivePriority.priority.slice(0, 4).map((obj, index) => (
-                        <div key={index} className="list-group-item d-flex justify-content-between align-items-center px-0">
+                        <div key={index} className="list-group-item d-flex justify-content-between align-items-center px-0" style={{ backgroundColor: 'transparent', border: 'none', borderBottom: '1px solid #333' }}>
                           <div className="d-flex align-items-center">
                             <span className={`badge me-3 ${
                               index === 0 ? 'bg-warning' : 
@@ -1556,16 +2589,16 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                             }`}>
                               {index + 1}
                             </span>
-                            <span>{obj.name || `${index + 1}순위`}</span>
+                            <span className="text-white">{obj.name || `${index + 1}순위`}</span>
                           </div>
                           {obj.rate && (
-                            <small className="text-muted">{obj.rate}%</small>
+                            <small className="text-light">{obj.rate}%</small>
                           )}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="text-center text-muted py-3">
+                    <div className="text-center text-light py-3">
                       <i className="bi bi-info-circle mb-2" style={{fontSize: '2rem'}}></i>
                       <p>우선순위 데이터가 없습니다</p>
                     </div>
@@ -1576,9 +2609,9 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
             {/* 개인 오브젝트 효율성 */}
             <div className="col-md-6">
-              <div className="card h-100">
-                <div className="card-header">
-                  <h6 className="mb-0">
+              <div className="card h-100" style={{ backgroundColor: '#1a1a1a', border: '1px solid #333' }}>
+                <div className="card-header" style={{ backgroundColor: '#2a2a2a', border: 'none' }}>
+                  <h6 className="mb-0 text-white">
                     <i className="bi bi-person-check"></i> 개인 오브젝트 효율성
                   </h6>
                 </div>
@@ -1587,14 +2620,14 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                     <div>
                       <div className="row text-center mb-3">
                         <div className="col-6">
-                          <div className="border-end">
+                          <div className="border-end border-secondary">
                             <h5 className="text-primary mb-1">{objectiveEfficiency.totalParticipation}</h5>
-                            <small className="text-muted">총 참여</small>
+                            <small className="text-light">총 참여</small>
                           </div>
                         </div>
                         <div className="col-6">
                           <h5 className="text-success mb-1">{objectiveEfficiency.successRate}%</h5>
-                          <small className="text-muted">성공률</small>
+                          <small className="text-light">성공률</small>
                         </div>
                       </div>
 
@@ -1627,7 +2660,7 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                       </div>
                     </div>
                   ) : (
-                    <div className="text-center text-muted py-3">
+                    <div className="text-center text-light py-3">
                       <i className="bi bi-info-circle mb-2" style={{fontSize: '2rem'}}></i>
                       <p>효율성 데이터가 없습니다</p>
                     </div>
@@ -1639,9 +2672,9 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
 
           {/* 오브젝트 분석 팁 */}
           <div className="mt-4">
-            <div className="card border-0 bg-light">
+            <div className="card border-0" style={{ backgroundColor: '#1a1a1a' }}>
               <div className="card-body">
-                <h6 className="card-title">
+                <h6 className="card-title text-white">
                   <i className="bi bi-lightbulb"></i> 오브젝트 분석 팁
                 </h6>
                 <div className="row">
@@ -1649,11 +2682,11 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                     <ul className="list-unstyled mb-0">
                       <li className="mb-2">
                         <i className="bi bi-check-circle text-success me-2"></i>
-                        <small>바론 승률이 높다면 후반 운영에 강점이 있습니다</small>
+                        <small className="text-light">바론 승률이 높다면 후반 운영에 강점이 있습니다</small>
                       </li>
                       <li className="mb-2">
                         <i className="bi bi-check-circle text-success me-2"></i>
-                        <small>드래곤 승률이 높다면 중반 싸움에 강합니다</small>
+                        <small className="text-light">드래곤 승률이 높다면 중반 싸움에 강합니다</small>
                       </li>
                     </ul>
                   </div>
@@ -1661,11 +2694,11 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
                     <ul className="list-unstyled mb-0">
                       <li className="mb-2">
                         <i className="bi bi-check-circle text-success me-2"></i>
-                        <small>전령 승률이 높다면 초반 라인 우위를 잘 활용합니다</small>
+                        <small className="text-light">전령 승률이 높다면 초반 라인 우위를 잘 활용합니다</small>
                       </li>
                       <li className="mb-2">
                         <i className="bi bi-check-circle text-success me-2"></i>
-                        <small>유충 승률이 높다면 초중반 스노볼링에 능합니다</small>
+                        <small className="text-light">유충 승률이 높다면 초중반 스노볼링에 능합니다</small>
                       </li>
                     </ul>
                   </div>
