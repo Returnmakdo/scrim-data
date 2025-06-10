@@ -556,14 +556,14 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
     const grade = getGradeFromPercentile(percentileScore).grade;
     
     switch(grade) {
-      case 'S': return 'rgba(0, 150, 200, 0.8)'; // 진한 파란색 (S등급)
-      case 'A': return 'rgba(34, 139, 34, 0.7)'; // 초록색 (A등급)
-      case 'B+': return 'rgba(70, 130, 180, 0.6)'; // 연한 파란색 (B+등급)
-      case 'B': return 'rgba(100, 149, 237, 0.5)'; // 더 연한 파란색 (B등급)
-      case 'B-': return 'rgba(119, 136, 153, 0.5)'; // 회색 파란색 (B-등급)
-      case 'C': return 'rgba(105, 105, 105, 0.4)'; // 회색 (C등급)
-      case 'D': return 'rgba(220, 53, 69, 0.5)'; // 빨간색 (D등급)
-      case 'F': return 'rgba(139, 0, 0, 0.6)'; // 진한 빨간색 (F등급)
+      case 'S': return 'rgba(0, 120, 255, 0.9)'; // 매우 선명한 파란색 (S등급)
+      case 'A': return 'rgba(34, 139, 34, 0.8)'; // 선명한 초록색 (A등급)
+      case 'B+': return 'rgba(70, 130, 180, 0.7)'; // 선명한 연한 파란색 (B+등급)
+      case 'B': return 'rgba(100, 149, 237, 0.6)'; // 약간 흐린 파란색 (B등급)
+      case 'B-': return 'rgba(119, 136, 153, 0.5)'; // 회색 섞인 파란색 (B-등급)
+      case 'C': return 'rgba(128, 128, 128, 0.4)'; // 회색 (C등급)
+      case 'D': return 'rgba(220, 53, 69, 0.4)'; // 약간 흐린 연한 투명한 빨간색 (D등급)
+      case 'F': return 'rgba(220, 20, 60, 0.8)'; // 매우 선명한 빨간색 (F등급)
       default: return 'rgba(105, 105, 105, 0.3)'; // 기본 회색
     }
   };
