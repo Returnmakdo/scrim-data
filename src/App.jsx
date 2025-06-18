@@ -28,6 +28,23 @@ function App() {
       querySnapshot.forEach((doc) => {
         fetchedData.push({ id: doc.id, ...doc.data() });
       });
+      
+      // 🔍 gameVersion 값들 확인을 위한 로그
+      console.log("=== 모든 gameVersion 값들 ===");
+      const allVersions = fetchedData.map(game => game.gameVersion).filter(Boolean);
+      const uniqueVersions = [...new Set(allVersions)];
+      console.log("고유 버전들:", uniqueVersions);
+      
+      const versionCounts = {};
+      allVersions.forEach(v => {
+        versionCounts[v] = (versionCounts[v] || 0) + 1;
+      });
+      console.log("버전별 게임 수:", versionCounts);
+      
+      // 15.12 관련 버전 찾기
+      const version15_12 = uniqueVersions.filter(v => v.includes("15.12"));
+      console.log("15.12 관련 버전들:", version15_12);
+      
       setJsonData(fetchedData);
     } catch (e) {
       console.error("데이터 가져오기 실패:", e);
@@ -95,6 +112,9 @@ function App() {
   const versions = Array.from(
     new Set((jsonData || []).map((g) => g.gameVersion?.split(".").slice(0, 2).join(".")))
   ).sort((a, b) => b.localeCompare(a));
+
+  // 🔍 생성된 버전 목록 확인
+  console.log("생성된 versions 배열:", versions);
 
   return (
     <div className="container mt-5">

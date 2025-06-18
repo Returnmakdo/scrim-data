@@ -31,13 +31,17 @@ const DataTable = ({ jsonData, version }) => {
       data.participants[0]?.riotIdGameName === selectedRiotId
   );
 
-
-  // 🔥 version 필터 적용된 데이터
-  const versionFilteredParticipants =
-    selectedData?.participants.filter((p) => {
-      const gv = p.gameVersion;
-      return gv?.split(".").slice(0, 2).join(".") === version;
-    }) || [];
+  // 🔥 수정된 버전 필터링 로직: 게임 레벨에서 버전 확인
+  const versionFilteredParticipants = selectedData ? 
+    jsonData
+      .filter((game) => {
+        const gv = game.gameVersion;
+        return gv?.split(".").slice(0, 2).join(".") === version;
+      })
+      .flatMap(game => game.participants || [])
+      .filter(p => 
+        (p.RIOT_ID_GAME_NAME === selectedRiotId || p.riotIdGameName === selectedRiotId)
+      ) : [];
 
   return (
     <div>

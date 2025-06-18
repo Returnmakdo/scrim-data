@@ -26,15 +26,27 @@ import {
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from 'recharts';
 
 const AdvancedAnalytics = ({ jsonData, version }) => {
-  const groupedData = groupBySummonerId(jsonData).filter((data) => {
-    const riotId =
-      data.participants[0]?.RIOT_ID_GAME_NAME ||
-      data.participants[0]?.riotIdGameName;
-    return allowedIds.includes(riotId);
-  });
+  // 해당 버전에 참가한 allowedIds 플레이어들만 필터링
+  const versionSpecificGroupedData = (() => {
+    const versionFilteredGames = jsonData.filter((game) => {
+      const gv = game.gameVersion;
+      return gv?.split(".").slice(0, 2).join(".") === version;
+    });
+    
+    const versionParticipants = versionFilteredGames.flatMap(game => game.participants || []);
+    const versionPlayerNames = [...new Set(versionParticipants
+      .map(p => p.RIOT_ID_GAME_NAME || p.riotIdGameName)
+      .filter(name => allowedIds.includes(name))
+    )];
+    
+    return groupBySummonerId(jsonData).filter((data) => {
+      const riotId = data.participants[0]?.RIOT_ID_GAME_NAME || data.participants[0]?.riotIdGameName;
+      return versionPlayerNames.includes(riotId);
+    });
+  })();
 
   const [selectedRiotId, setSelectedRiotId] = useState(() => {
-    const firstValid = groupedData[0]?.participants[0];
+    const firstValid = versionSpecificGroupedData[0]?.participants[0];
     return (
       firstValid?.RIOT_ID_GAME_NAME || firstValid?.riotIdGameName || ""
     );
@@ -46,17 +58,93 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
     setSelectedRiotId(e.target.value);
   };
 
-  const selectedData = groupedData.find(
+  const selectedData = versionSpecificGroupedData.find(
     (data) =>
       data.participants[0]?.RIOT_ID_GAME_NAME === selectedRiotId ||
       data.participants[0]?.riotIdGameName === selectedRiotId
   );
 
-  const versionFilteredParticipants =
-    selectedData?.participants.filter((p) => {
-      const gv = p.gameVersion;
+  // 🔥 수정된 버전 필터링 로직: 게임 레벨에서 버전 확인
+  const versionFilteredParticipants = selectedData ? 
+    jsonData
+      .filter((game) => {
+        const gv = game.gameVersion;
+        return gv?.split(".").slice(0, 2).join(".") === version;
+      })
+      .flatMap(game => game.participants || [])
+      .filter(p => 
+        (p.RIOT_ID_GAME_NAME === selectedRiotId || p.riotIdGameName === selectedRiotId)
+      ) : [];
+
+  // 🔍 디버깅 로그 추가
+  console.log("=== AdvancedAnalytics 디버깅 ===");
+  console.log("선택된 버전:", version);
+  console.log("선택된 플레이어:", selectedRiotId);
+  console.log("전체 게임 수:", jsonData.length);
+  console.log("allowedIds:", allowedIds);
+  
+  const versionFilteredGames = jsonData.filter((game) => {
+    const gv = game.gameVersion;
+    return gv?.split(".").slice(0, 2).join(".") === version;
+  });
+  console.log("버전 필터링 후 게임 수:", versionFilteredGames.length);
+  console.log("버전 필터링된 게임들의 버전:", versionFilteredGames.map(g => g.gameVersion));
+  
+  const allParticipantsInVersionGames = versionFilteredGames.flatMap(game => game.participants || []);
+  console.log("버전 필터링된 게임의 모든 참가자 수:", allParticipantsInVersionGames.length);
+  
+  // 해당 버전 게임들의 모든 플레이어 이름들 확인
+  const allPlayerNames = [...new Set(allParticipantsInVersionGames.map(p => p.RIOT_ID_GAME_NAME || p.riotIdGameName).filter(Boolean))];
+  console.log("해당 버전 게임의 모든 플레이어 이름들:", allPlayerNames);
+  
+  const playerParticipants = allParticipantsInVersionGames.filter(p => 
+    (p.RIOT_ID_GAME_NAME === selectedRiotId || p.riotIdGameName === selectedRiotId)
+  );
+  console.log("해당 플레이어의 참가 기록 수:", playerParticipants.length);
+  console.log("최종 versionFilteredParticipants 길이:", versionFilteredParticipants.length);
+
+  // 해당 버전에 참가한 allowedIds 플레이어가 없는 경우
+  if (versionSpecificGroupedData.length === 0) {
+    const versionFilteredGames = jsonData.filter((game) => {
+      const gv = game.gameVersion;
       return gv?.split(".").slice(0, 2).join(".") === version;
-    }) || [];
+    });
+    
+    const versionParticipants = versionFilteredGames.flatMap(game => game.participants || []);
+    const allVersionPlayerNames = [...new Set(versionParticipants
+      .map(p => p.RIOT_ID_GAME_NAME || p.riotIdGameName)
+      .filter(Boolean)
+    )];
+    
+    const availableAllowedPlayers = allowedIds.filter(id => 
+      allVersionPlayerNames.includes(id)
+    );
+
+    return (
+      <div className="text-center py-5">
+        <div className="mb-4">
+          <i className="bi bi-exclamation-triangle text-warning" style={{fontSize: '3rem'}}></i>
+        </div>
+        <h5 className="text-white mb-3">해당 버전({version})에 참가한 팀원이 없습니다</h5>
+        {availableAllowedPlayers.length > 0 ? (
+          <div className="alert alert-info" style={{ backgroundColor: '#1a1a1a', border: '1px solid #17a2b8' }}>
+            <h6 className="text-white mb-2">이 버전에 참가한 팀원:</h6>
+            <div className="d-flex flex-wrap justify-content-center gap-2">
+              {availableAllowedPlayers.map(player => (
+                <span key={player} className="badge bg-primary fs-6">{player}</span>
+              ))}
+            </div>
+            <small className="text-light mt-2 d-block">다른 버전을 선택하거나 위 팀원들의 데이터를 확인해보세요.</small>
+          </div>
+        ) : (
+          <div className="alert alert-warning" style={{ backgroundColor: '#1a1a1a', border: '1px solid #ffc107' }}>
+            <p className="text-light mb-2">이 버전에는 등록된 팀원이 참가하지 않았습니다.</p>
+            <small className="text-light">다른 버전을 선택해주세요.</small>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (versionFilteredParticipants.length === 0) {
     return <div>해당 버전의 기록이 없습니다</div>;
@@ -941,7 +1029,7 @@ const AdvancedAnalytics = ({ jsonData, version }) => {
           value={selectedRiotId}
           onChange={handleSelectChange}
         >
-          {groupedData.map((data, index) => (
+          {versionSpecificGroupedData.map((data, index) => (
             <option
               key={index}
               value={
